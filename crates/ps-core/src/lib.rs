@@ -13,3 +13,6 @@ pub use profile::{Profile, ProfileDefaults};
 
 pub mod technique;
 pub use technique::TechniqueTag;
+
+pub mod id;
+pub use id::{CatchId, EngagementId, EventId};
