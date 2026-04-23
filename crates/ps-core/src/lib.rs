@@ -21,3 +21,12 @@ pub mod event;
 pub use event::{Event, SCHEMA as EVENT_SCHEMA};
 
 pub mod scope;
+
+pub mod config;
+pub use config::{Config, ConfigError};
+
+pub mod engagement;
+pub use engagement::Engagement;
+
+pub mod errors;
+pub use errors::{Error, Result};
