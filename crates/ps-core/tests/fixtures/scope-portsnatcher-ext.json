@@ -1,0 +1,24 @@
+{
+  "engagement_id": "ENG-2026-0142",
+  "client": "Acme Corp",
+  "operator": "mike.chamberland@integsec.com",
+  "authorized_targets": {
+    "ip_ranges": ["10.10.10.0/24"],
+    "domains": ["*.acme.com"],
+    "urls": ["https://app.acme.com"],
+    "cloud_accounts": []
+  },
+  "excluded_targets": ["203.0.113.5"],
+  "authorized_techniques": ["recon", "web_app", "api_testing", "ssl_tls"],
+  "excluded_techniques": ["dos", "destructive", "social_engineering"],
+  "engagement_window": {
+    "start": "2026-04-22T08:00:00Z",
+    "end": "2026-05-06T17:00:00Z"
+  },
+  "portsnatcher": {
+    "port_policy": {
+      "include": ["ephemeral-iana", "22", "80", "443"],
+      "exclude": []
+    }
+  }
+}

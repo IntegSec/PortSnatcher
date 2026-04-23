@@ -1,0 +1,18 @@
+{
+  "engagement_id": "ENG-2025-0142",
+  "client": "Acme Corp",
+  "operator": "operator@integsec.com",
+  "authorized_targets": {
+    "ip_ranges": ["10.10.10.0/24", "203.0.113.0/28"],
+    "domains": ["*.acme.com", "acme-staging.example.com"],
+    "urls": ["https://app.acme.com", "https://api.acme.com"],
+    "cloud_accounts": ["aws:123456789012", "azure:sub-xxxx"]
+  },
+  "excluded_targets": ["203.0.113.5", "hr.acme.com"],
+  "authorized_techniques": ["recon", "web_app", "api_testing"],
+  "excluded_techniques": ["dos", "destructive", "social_engineering"],
+  "engagement_window": {
+    "start": "2026-03-26T08:00:00Z",
+    "end": "2026-04-09T17:00:00Z"
+  }
+}

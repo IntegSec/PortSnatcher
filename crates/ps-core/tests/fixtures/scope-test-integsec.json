@@ -1,0 +1,26 @@
+{
+  "engagement_id": "ENG-2026-TEST-001",
+  "client": "IntegSec Internal",
+  "operator": "security@integsec.com",
+  "authorized_targets": {
+    "ip_ranges": [],
+    "domains": [
+      "turbopentest.com",
+      "*.turbopentest.com",
+      "integsec.com",
+      "*.integsec.com"
+    ],
+    "urls": [
+      "https://turbopentest.com",
+      "https://integsec.com"
+    ],
+    "cloud_accounts": []
+  },
+  "excluded_targets": [],
+  "authorized_techniques": ["recon", "web_app", "api_testing", "ssl_tls"],
+  "excluded_techniques": ["dos", "destructive", "social_engineering"],
+  "engagement_window": {
+    "start": "2026-03-27T00:00:00Z",
+    "end": "2026-04-27T23:59:59Z"
+  }
+}

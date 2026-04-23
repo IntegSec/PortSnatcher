@@ -19,3 +19,5 @@ pub use id::{CatchId, EngagementId, EventId};
 
 pub mod event;
 pub use event::{Event, SCHEMA as EVENT_SCHEMA};
+
+pub mod scope;
