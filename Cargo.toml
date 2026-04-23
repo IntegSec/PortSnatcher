@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/ps-core", "crates/ps-bus", "crates/ps-notify", "crates/portsnatcher"]
+members = ["crates/ps-core", "crates/ps-bus", "crates/ps-notify", "crates/ps-engine", "crates/portsnatcher"]
 
 # Disk-constrained dev profile. Debug info is the bulk of target/; disabling
 # it drops artifact size by 60-70% at the cost of losing source-level
