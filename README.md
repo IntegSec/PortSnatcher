@@ -3,11 +3,18 @@
 **Catch ephemeral ports the moment they open — fingerprint, hold open, and hand off to the pentester before the window closes.**
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Status](https://img.shields.io/badge/status-design_complete_%E2%80%94_implementation_in_progress-orange)](./docs/superpowers/specs/2026-04-22-portsnatcher-design.md)
+[![Status](https://img.shields.io/badge/status-v0.1.0--alpha%20%E2%80%94%20foundations%20shipped-yellow)](./CHANGELOG.md)
+[![CI](https://github.com/IntegSec/PortSnatcher/actions/workflows/ci.yml/badge.svg)](https://github.com/IntegSec/PortSnatcher/actions/workflows/ci.yml)
 [![Platform](https://img.shields.io/badge/platform-linux_%7C_macOS_%7C_windows-lightgrey)]()
 [![Made by IntegSec](https://img.shields.io/badge/made_by-IntegSec-black)](https://integsec.com)
 
-> **Current status — April 2026:** design is locked ([read the spec](./docs/superpowers/specs/2026-04-22-portsnatcher-design.md)); implementation is in progress. This repo is public from day one so the security community can shape the tool as it lands. Install instructions below describe the target UX; replace with "build from source" until the first release ships.
+> **Current status — April 2026 / v0.1.0-alpha:** foundations shipped. The
+> `portsnatcher/v1` event schema is frozen and locked behind snapshot tests.
+> The scope-file format is cross-compatible with [`IntegSec/agentic-pentest-proxy`](https://github.com/IntegSec/agentic-pentest-proxy).
+> A `--dry-run` mode exercises the full scope → config → event bus → sinks
+> spine with a synthetic event stream. Actual port-catching (Connect engine
+> + probe ladder) lands in v0.1.0. [Read the spec](./docs/superpowers/specs/2026-04-22-portsnatcher-design.md)
+> · [See the phase plans](./docs/superpowers/plans/) · [CHANGELOG](./CHANGELOG.md).
 
 ---
 
