@@ -10,3 +10,6 @@ pub use port::{PortSpec, PortSpecError};
 
 pub mod profile;
 pub use profile::{Profile, ProfileDefaults};
+
+pub mod technique;
+pub use technique::TechniqueTag;
