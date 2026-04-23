@@ -1,0 +1,17 @@
+---
+source: crates/ps-core/tests/event_schema.rs
+expression: to_canonical_json(&ev)
+---
+{
+  "catch_id": "01HX2K7Y9P8R5M4N3A2B1C0D9E",
+  "engagement_id": "01HX2K009P8R5M4N3A2B1C0D9E",
+  "event_id": "01HX2K7Z9P8R5M4N3A2B1C0D9E",
+  "payload": {
+    "bytes_captured": 1234,
+    "outcome": "match",
+    "probe": "tls_hello"
+  },
+  "schema": "portsnatcher/v1",
+  "timestamp": "2026-04-22T20:30:15Z",
+  "type": "ProbeAttempted"
+}
