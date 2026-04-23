@@ -1,0 +1,22 @@
+[package]
+name = "ephemeral-flapper"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Test-only binary that opens/closes TCP ports on programmable schedules. Drives the PortSnatcher race-conformance suite."
+publish = false
+
+[[bin]]
+name = "ephemeral-flapper"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+toml = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

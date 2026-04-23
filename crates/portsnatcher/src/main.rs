@@ -6,6 +6,7 @@ use tracing_subscriber::EnvFilter;
 mod cli;
 mod cmd;
 mod orchestrator;
+mod tui;
 
 use crate::cli::{Cli, Command};
 use crate::orchestrator::Orchestrator;
@@ -26,7 +27,7 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    anyhow::bail!("non-dry-run execution lands in Phase 2; use --dry-run to validate wiring");
+    anyhow::bail!("non-dry-run execution lands in a follow-up; use --dry-run to validate wiring");
 }
 
 fn init_tracing() {

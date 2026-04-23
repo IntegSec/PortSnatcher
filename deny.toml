@@ -1,0 +1,90 @@
+# cargo-deny configuration for PortSnatcher.
+#
+# Three axes are enforced:
+#   * advisories — RUSTSEC vulnerabilities from rustsec/advisory-db
+#   * licenses   — allowlist of SPDX identifiers we will ship
+#   * bans       — duplicate-crate policy
+#
+# See https://embarkstudios.github.io/cargo-deny/ for full reference.
+
+[graph]
+all-features = false
+no-default-features = false
+
+[output]
+feature-depth = 1
+
+# ---------- Advisories ----------------------------------------------------
+# Deny high and critical vulnerabilities outright. Informational advisories
+# (unmaintained, notices) warn so we see them in CI without blocking
+# releases on a downstream crate's maintainer status.
+
+[advisories]
+version = 2
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+yanked = "warn"
+ignore = []
+
+# Map informational advisories to "warn" explicitly. The top-level
+# `severity-threshold` gate applies to vulnerabilities only.
+severity-threshold = "high"
+
+# ---------- Licenses ------------------------------------------------------
+# Permissive, well-known licenses only. Copyleft (GPL-*, AGPL-*) is
+# incompatible with shipping PortSnatcher under Apache-2.0; deny it
+# explicitly. MPL-2.0 is permitted because it is file-scoped copyleft
+# and every MPL crate we consume is used unmodified.
+
+[licenses]
+version = 2
+confidence-threshold = 0.8
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-DFS-2016",
+    "Unicode-3.0",
+    "Zlib",
+    "0BSD",
+    "MPL-2.0",
+    "CC0-1.0",
+]
+exceptions = []
+
+[[licenses.clarify]]
+crate = "ring"
+expression = "MIT AND ISC AND OpenSSL"
+license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
+
+# ---------- Bans ----------------------------------------------------------
+# Duplicate versions of the same crate bloat the binary and slow compile
+# times, but are rarely worth failing CI over — ecosystem churn (syn 1
+# vs 2, toml_edit) means we would spend more time chasing upstreams than
+# catching real bugs. Warn, do not deny.
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+workspace-default-features = "allow"
+external-default-features = "allow"
+allow = []
+deny = []
+skip = []
+skip-tree = []
+
+# ---------- Sources -------------------------------------------------------
+# All crates must come from crates.io or our own git repositories. No
+# ad-hoc registries, no private forks we've forgotten about.
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = [
+    "https://github.com/IntegSec",
+]

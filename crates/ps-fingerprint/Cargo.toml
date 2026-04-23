@@ -1,19 +1,18 @@
 [package]
-name = "ps-engine"
+name = "ps-fingerprint"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "PortSnatcher probe engines: Connect (Phase 2), Raw (Phase 4)."
+description = "PortSnatcher fingerprinter: probe ladder, probes, and fingerprint cache."
 
 [dependencies]
 ps-core = { path = "../ps-core" }
 ps-bus = { path = "../ps-bus" }
 
 tokio = { workspace = true }
-tokio-util = { workspace = true }
 async-trait = { workspace = true }
 futures = { workspace = true }
 anyhow = { workspace = true }
@@ -24,14 +23,13 @@ tracing = { workspace = true }
 bytes = { workspace = true }
 time = { workspace = true }
 
-# Phase 4 RawEngine dependencies.
-socket2 = { version = "0.5", features = ["all"] }
-which = "6"
-
-[target.'cfg(target_os = "windows")'.dependencies]
-libloading = "0.8"
+httparse = "1"
+rustls = "0.23"
+rustls-pki-types = "1"
+tokio-rustls = "0.26"
+pem = "3"
+serde_bytes = "0.11"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros"] }
-proptest = { workspace = true }
 tempfile = { workspace = true }

@@ -1,0 +1,56 @@
+name: fuzz
+
+# Nightly fuzz run. Each target burns five minutes on ubuntu-latest,
+# which is our proven libfuzzer platform. If any target produces a
+# crashing input, the whole artefact directory (including the seed
+# corpus and the reproducer) is uploaded for triage.
+#
+# Linux-only by design: libfuzzer on macOS and Windows is flaky for
+# long unattended runs and the incremental coverage we'd get there
+# does not justify the maintenance burden.
+
+on:
+  schedule:
+    # 03:00 UTC, every day.
+    - cron: '0 3 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fuzz:
+    name: fuzz ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - fuzz_scope_file
+          - fuzz_event_deserialize
+          - fuzz_http_parse
+          - fuzz_tls_parse
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nightly Rust
+        run: |
+          rustup toolchain install nightly --profile minimal --no-self-update
+          rustup component add rust-src --toolchain nightly
+      - name: Install cargo-fuzz
+        run: cargo +nightly install cargo-fuzz --locked
+      - name: Run fuzz target for 5 minutes
+        working-directory: fuzz
+        run: |
+          cargo +nightly fuzz run ${{ matrix.target }} -- -max_total_time=300
+      - name: Upload artefacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}
+          path: |
+            fuzz/artifacts/${{ matrix.target }}/**
+            fuzz/corpus/${{ matrix.target }}/**
+          if-no-files-found: ignore
