@@ -101,14 +101,20 @@ impl HoldOpen for TlsMitm {
         // startup, but this keeps TlsMitm self-contained.
         let _ = rustls::crypto::ring::default_provider().install_default();
 
-        let hostname = upstream_hostname
-            .clone()
-            .unwrap_or_else(|| self.upstream_hostname.clone());
+        // Destructure Self so we can freely move fields into tasks.
+        let Self {
+            ca,
+            upstream_hostname: default_hostname,
+            manager,
+            upstream_roots_override,
+        } = *self;
 
-        let (listener, local_port) = self.manager.bind_loopback().await?;
+        let hostname = upstream_hostname.unwrap_or(default_hostname);
+
+        let (listener, local_port) = manager.bind_loopback().await?;
 
         // Pre-sign the leaf once; handshake always returns the same cert.
-        let leaf = self.ca.sign_leaf(&hostname).context("sign MITM leaf")?;
+        let leaf = ca.sign_leaf(&hostname).context("sign MITM leaf")?;
         let server_cfg = Arc::new(
             ServerConfig::builder()
                 .with_no_client_auth()
@@ -117,7 +123,7 @@ impl HoldOpen for TlsMitm {
 
         // Upstream client config: webpki defaults, unless the caller
         // supplied an override (tests use this).
-        let roots = if let Some(override_roots) = self.upstream_roots_override {
+        let roots = if let Some(override_roots) = upstream_roots_override {
             override_roots
         } else {
             let mut r = RootCertStore::empty();
@@ -132,7 +138,7 @@ impl HoldOpen for TlsMitm {
                 .with_no_client_auth(),
         );
 
-        let fingerprint = self.ca.fingerprint_sha256.clone();
+        let fingerprint = ca.fingerprint_sha256.clone();
         bus.send(Event::new(
             engagement_id,
             Some(catch_id),
@@ -246,11 +252,11 @@ async fn shuttle(
 
     let mut buf_up = vec![0u8; 8192];
     let mut buf_down = vec![0u8; 8192];
-    loop {
+    let reason: &'static str = loop {
         tokio::select! {
             r = local.read(&mut buf_up) => match r {
-                Ok(0) => return "pentester_detach",
-                Err(_) => return "pentester_detach",
+                Ok(0) => break "pentester_detach",
+                Err(_) => break "pentester_detach",
                 Ok(n) => {
                     if let Some(f) = transcript.as_mut() {
                         let _ = f.write_all(b"--> client->upstream\n").await;
@@ -258,13 +264,13 @@ async fn shuttle(
                         let _ = f.write_all(b"\n").await;
                     }
                     if upstream.write_all(&buf_up[..n]).await.is_err() {
-                        return "upstream_closed";
+                        break "upstream_closed";
                     }
                 }
             },
             r = upstream.read(&mut buf_down) => match r {
-                Ok(0) => return "upstream_closed",
-                Err(_) => return "upstream_closed",
+                Ok(0) => break "upstream_closed",
+                Err(_) => break "upstream_closed",
                 Ok(n) => {
                     if let Some(f) = transcript.as_mut() {
                         let _ = f.write_all(b"<-- upstream->client\n").await;
@@ -272,10 +278,17 @@ async fn shuttle(
                         let _ = f.write_all(b"\n").await;
                     }
                     if local.write_all(&buf_down[..n]).await.is_err() {
-                        return "pentester_detach";
+                        break "pentester_detach";
                     }
                 }
             },
         }
+    };
+    // Flush the transcript file before dropping so short tests that read
+    // it back immediately don't race against tokio's async buffer.
+    if let Some(mut f) = transcript {
+        let _ = f.flush().await;
+        let _ = f.sync_all().await;
     }
+    reason
 }

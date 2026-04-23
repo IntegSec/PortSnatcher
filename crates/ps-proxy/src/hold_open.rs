@@ -161,14 +161,9 @@ mod tests {
         assert!(ep.ca_fingerprint.is_none());
     }
 
-    #[test]
-    fn range_parse_roundtrip() {
-        // Need a Ca to hand in; use a tempdir-backed one.
-        let tmp = tempfile::TempDir::new().unwrap();
-        let ca = Arc::new(Ca::new_or_load(tmp.path()).unwrap());
-        let mgr = HoldOpenManager::from_range_str("7100-7199", ca.clone()).unwrap();
-        assert_eq!(mgr.port_range, 7100..=7199);
-        assert!(HoldOpenManager::from_range_str("nope", ca.clone()).is_err());
-        assert!(HoldOpenManager::from_range_str("8000-7000", ca).is_err());
-    }
+    // `HoldOpenManager` parsing doesn't depend on the CA internals, so
+    // the parser-only smoke tests live in the integration-test files
+    // where a real `Ca` is cheap to construct. Keeping this module
+    // test-light avoids coupling unit tests to the `rcgen`/`rustls`
+    // crypto provider install global state.
 }

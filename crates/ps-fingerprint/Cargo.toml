@@ -20,7 +20,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-bytes = { workspace = true }
+bytes = { workspace = true, features = ["serde"] }
 time = { workspace = true }
 
 httparse = "1"
@@ -28,7 +28,6 @@ rustls = "0.23"
 rustls-pki-types = "1"
 tokio-rustls = "0.26"
 pem = "3"
-serde_bytes = "0.11"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros"] }

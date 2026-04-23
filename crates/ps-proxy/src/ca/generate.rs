@@ -12,7 +12,7 @@ use std::path::Path;
 
 use anyhow::{anyhow, Context};
 use rcgen::{
-    BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, Issuer, KeyPair,
+    BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, KeyPair,
     KeyUsagePurpose, SanType, PKCS_ECDSA_P256_SHA256,
 };
 use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
@@ -112,13 +112,17 @@ pub fn sign_leaf_internal(
     ca_key_pem: &str,
     hostname: &str,
 ) -> anyhow::Result<CertifiedKey> {
-    // Rebuild the CA params from the serialized cert so rcgen can
-    // sign on its behalf.
+    // Reconstruct an in-memory CA Certificate. `self_signed` produces a
+    // cert with a different serial/timestamps than the on-disk original,
+    // but since the subject DN and public key match, any leaf we sign
+    // with it chains identically against the stored-on-disk CA.
     let ca_cert_pem = der_to_pem(ca_cert_der, "CERTIFICATE");
     let ca_params = CertificateParams::from_ca_cert_pem(&ca_cert_pem)
         .context("parse CA cert PEM for issuer")?;
     let ca_key = KeyPair::from_pem(ca_key_pem).context("parse CA key PEM")?;
-    let issuer: Issuer<'_, KeyPair> = Issuer::new(ca_params, ca_key);
+    let ca_cert = ca_params
+        .self_signed(&ca_key)
+        .context("reconstitute in-memory CA certificate")?;
 
     let leaf_key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256)?;
     let mut leaf_params = CertificateParams::new(vec![hostname.to_string()])?;
@@ -135,7 +139,7 @@ pub fn sign_leaf_internal(
     leaf_params.not_before = now - Duration::hours(1);
     leaf_params.not_after = now + Duration::days(90);
 
-    let leaf_cert = leaf_params.signed_by(&leaf_key, &issuer)?;
+    let leaf_cert = leaf_params.signed_by(&leaf_key, &ca_cert, &ca_key)?;
     let leaf_der = leaf_cert.der().to_vec();
 
     // Extract the PKCS#8 DER of the leaf key from rcgen's PEM.
@@ -166,7 +170,7 @@ fn first_cert_der(pem: &str) -> anyhow::Result<Vec<u8>> {
     let mut reader = Cursor::new(pem.as_bytes());
     for item in rustls_pemfile::certs(&mut reader) {
         let der = item.context("read CERTIFICATE block")?;
-        return Ok(der.to_vec());
+        return Ok(der.as_ref().to_vec());
     }
     Err(anyhow!("no CERTIFICATE block"))
 }
@@ -177,13 +181,6 @@ fn first_pkcs8_der(pem: &str) -> anyhow::Result<Vec<u8>> {
     for item in rustls_pemfile::pkcs8_private_keys(&mut reader) {
         let der = item.context("read PRIVATE KEY block")?;
         return Ok(der.secret_pkcs8_der().to_vec());
-    }
-    // Also try the generic "ANY PRIVATE KEY" path.
-    let mut reader = Cursor::new(pem.as_bytes());
-    for item in rustls_pemfile::read_all(&mut reader) {
-        if let Ok(rustls_pemfile::Item::Pkcs8Key(k)) = item {
-            return Ok(k.secret_pkcs8_der().to_vec());
-        }
     }
     Err(anyhow!("no PRIVATE KEY block"))
 }

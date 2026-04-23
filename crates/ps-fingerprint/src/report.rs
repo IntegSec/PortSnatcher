@@ -24,7 +24,6 @@ pub struct FingerprintReport {
     /// Confidence of the best probe match in `[0.0, 1.0]`.
     pub confidence: f32,
     /// Raw bytes captured by the best-matching probe.
-    #[serde(with = "serde_bytes")]
     pub banner_excerpt: Bytes,
     /// TLS handshake details, when a TLS-class probe succeeded.
     pub tls_info: Option<TlsInfo>,

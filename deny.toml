@@ -25,10 +25,12 @@ db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
 yanked = "warn"
 ignore = []
-
-# Map informational advisories to "warn" explicitly. The top-level
-# `severity-threshold` gate applies to vulnerabilities only.
-severity-threshold = "high"
+# Informational advisories (unmaintained, unsound, notice) warn only;
+# vulnerability advisories default to "deny" under v2 which already
+# matches our policy of blocking high/critical severities in CI.
+unmaintained = "warn"
+unsound = "deny"
+notice = "warn"
 
 # ---------- Licenses ------------------------------------------------------
 # Permissive, well-known licenses only. Copyleft (GPL-*, AGPL-*) is
