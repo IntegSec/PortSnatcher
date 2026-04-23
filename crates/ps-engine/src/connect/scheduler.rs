@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use futures::stream::{FuturesUnordered, StreamExt};
+use futures::FutureExt;
 use ps_bus::broadcast::BusSender;
 use ps_core::engagement::Engagement;
 use ps_core::event::payload::{EventBody, PortOpenDetected, ScopeViolationBlocked};
