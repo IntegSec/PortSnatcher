@@ -1,0 +1,31 @@
+[package]
+name = "integsec-portsnatcher"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Catch ephemeral ports the moment they open — fingerprint, hold open, hand off to the pentester."
+
+[[bin]]
+name = "portsnatcher"
+path = "src/main.rs"
+
+[dependencies]
+ps-core = { path = "../ps-core" }
+ps-bus = { path = "../ps-bus" }
+ps-notify = { path = "../ps-notify" }
+
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+clap = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "macros"] }
+tempfile = { workspace = true }
+reqwest = { workspace = true }
