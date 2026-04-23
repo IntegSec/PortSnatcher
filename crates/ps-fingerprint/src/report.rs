@@ -51,10 +51,10 @@ pub struct TlsInfo {
 /// One row in the per-catch probe audit log.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProbeRunRecord {
-    /// Static probe identifier (matches `Fingerprinter::name`).
-    pub probe: &'static str,
+    /// Probe identifier (matches `Fingerprinter::name`).
+    pub probe: String,
     /// Outcome wire tag ("match", "nomatch", "error", "skipped", ...).
-    pub outcome: &'static str,
+    pub outcome: String,
     /// Number of bytes captured by this probe.
     pub bytes_captured: usize,
     /// How long the probe's `probe()` call took.
