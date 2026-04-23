@@ -43,6 +43,7 @@ pub struct Handle(pub Box<dyn KernelAssist>);
 
 /// Try to install a kernel-assist for this engagement. Dispatches to
 /// the per-OS module at compile time.
+#[allow(clippy::needless_return)]
 pub fn try_install(engagement: &Engagement) -> anyhow::Result<Option<Handle>> {
     #[cfg(target_os = "linux")]
     {

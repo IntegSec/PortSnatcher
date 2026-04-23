@@ -12,8 +12,8 @@ use std::path::Path;
 
 use anyhow::{anyhow, Context};
 use rcgen::{
-    BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, KeyPair,
-    KeyUsagePurpose, SanType, PKCS_ECDSA_P256_SHA256,
+    BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, KeyPair, KeyUsagePurpose,
+    SanType, PKCS_ECDSA_P256_SHA256,
 };
 use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
 use rustls::sign::CertifiedKey;
