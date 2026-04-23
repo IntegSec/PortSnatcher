@@ -1,6 +1,15 @@
 [workspace]
 resolver = "2"
-members = []
+members = ["crates/ps-core"]
+
+# Disk-constrained dev profile. Debug info is the bulk of target/; disabling
+# it drops artifact size by 60-70% at the cost of losing source-level
+# debugging. Tests still give stack traces (via panics) and error messages
+# remain fully informative. Revisit when we have more disk headroom.
+[profile.dev]
+debug = 0
+incremental = false
+
 
 [workspace.package]
 version = "0.1.0-alpha.0"
