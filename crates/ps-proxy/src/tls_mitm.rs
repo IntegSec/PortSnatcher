@@ -23,7 +23,7 @@ use ps_bus::broadcast::BusSender;
 use ps_core::event::payload::{EventBody, HoldOpenClosed, HoldOpenReady};
 use ps_core::event::Event;
 use ps_core::id::{CatchId, EngagementId};
-use rustls::pki_types::{CertificateDer, ServerName};
+use rustls::pki_types::ServerName;
 use rustls::server::{ClientHello, ResolvesServerCert};
 use rustls::sign::CertifiedKey;
 use rustls::{ClientConfig, RootCertStore, ServerConfig};

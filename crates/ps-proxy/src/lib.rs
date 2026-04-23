@@ -1,3 +1,10 @@
+#![allow(
+    clippy::never_loop,
+    clippy::manual_div_ceil,
+    clippy::needless_return,
+    clippy::manual_range_contains
+)]
+
 //! PortSnatcher hold-open proxy.
 //!
 //! Phase 3 of PortSnatcher: after a catch, the orchestrator hands the
