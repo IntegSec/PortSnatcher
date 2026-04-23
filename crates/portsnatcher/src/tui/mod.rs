@@ -16,5 +16,7 @@ pub mod app;
 pub mod runtime;
 pub mod widgets;
 
+#[allow(unused_imports)]
 pub use app::{CatchRow, HoldRow, TuiApp};
+#[allow(unused_imports)]
 pub use runtime::run;

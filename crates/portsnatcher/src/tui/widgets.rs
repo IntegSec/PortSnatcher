@@ -98,7 +98,7 @@ fn draw_catches(f: &mut Frame<'_>, area: Rect, app: &TuiApp) {
     let table = Table::new(rows, widths)
         .header(header)
         .block(Block::default().borders(Borders::ALL).title(title))
-        .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+        .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
 
     let mut state = TableState::default();
     if !app.catches.is_empty() {
