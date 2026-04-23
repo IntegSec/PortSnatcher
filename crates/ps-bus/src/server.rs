@@ -92,7 +92,7 @@ async fn ws_loop(mut socket: WebSocket, mut rx: crate::broadcast::BusReceiver) {
         let Ok(json) = serde_json::to_string(&ev) else {
             continue;
         };
-        if socket.send(Message::Text(json.into())).await.is_err() {
+        if socket.send(Message::Text(json)).await.is_err() {
             break;
         }
     }
