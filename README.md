@@ -210,4 +210,4 @@ Apache License 2.0 — see [`LICENSE`](./LICENSE) and [`NOTICE`](./NOTICE).
 
 ---
 
-Made in Canada by [IntegSec](https://integsec.com) — our first open-source Rust tool.
+Built by [IntegSec](https://integsec.com) — our first open-source Rust tool. Found a bug, want a feature, or know a use case we haven't thought of? [Open an issue](https://github.com/IntegSec/PortSnatcher/issues) or [start a discussion](https://github.com/IntegSec/PortSnatcher/discussions) — we want the pentest community shaping this.
