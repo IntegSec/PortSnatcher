@@ -24,5 +24,8 @@ fn parses_portsnatcher_extension() {
     let raw = include_str!("fixtures/scope-portsnatcher-ext.json");
     let sf: ScopeFile = serde_json::from_str(raw).expect("parse");
     let ext = sf.portsnatcher.as_ref().expect("has extension");
-    assert!(ext.port_policy.include.contains(&"ephemeral-iana".to_owned()));
+    assert!(ext
+        .port_policy
+        .include
+        .contains(&"ephemeral-iana".to_owned()));
 }

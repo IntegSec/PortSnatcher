@@ -41,7 +41,10 @@ macro_rules! id_newtype {
 }
 
 id_newtype!(EngagementId, "Identifier for a single engagement run.");
-id_newtype!(CatchId, "Identifier for one port-catch (groups all events per catch).");
+id_newtype!(
+    CatchId,
+    "Identifier for one port-catch (groups all events per catch)."
+);
 id_newtype!(EventId, "Per-event unique identifier.");
 
 #[cfg(test)]
@@ -53,7 +56,10 @@ mod tests {
         let a = EventId::new();
         std::thread::sleep(std::time::Duration::from_millis(2));
         let b = EventId::new();
-        assert!(a.to_string() < b.to_string(), "ULIDs must sort by generation time");
+        assert!(
+            a.to_string() < b.to_string(),
+            "ULIDs must sort by generation time"
+        );
     }
 
     #[test]

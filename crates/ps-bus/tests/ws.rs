@@ -36,9 +36,16 @@ async fn ws_streams_events_with_valid_bearer() {
     let token_value = token.0.clone();
     let shutdown = CancellationToken::new();
     let bind = "127.0.0.1:0".parse().unwrap();
-    let actual = run(bind, ServerState { bus: tx.clone(), token }, shutdown.clone())
-        .await
-        .unwrap();
+    let actual = run(
+        bind,
+        ServerState {
+            bus: tx.clone(),
+            token,
+        },
+        shutdown.clone(),
+    )
+    .await
+    .unwrap();
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     let mut request = format!("ws://{actual}/events/ws")

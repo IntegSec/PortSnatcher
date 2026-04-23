@@ -8,9 +8,9 @@
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-pub mod broadcast;
 pub mod auth;
+pub mod broadcast;
 pub mod server;
 
-pub use broadcast::{BusReceiver, BusSender};
 pub use auth::AuthToken;
+pub use broadcast::{BusReceiver, BusSender};

@@ -50,16 +50,15 @@ pub async fn run(
     Ok(actual)
 }
 
-async fn sse_handler(
-    State(state): State<Arc<ServerState>>,
-    headers: HeaderMap,
-) -> Response {
+async fn sse_handler(State(state): State<Arc<ServerState>>, headers: HeaderMap) -> Response {
     if !authorised(&headers, &state.token) {
         return (StatusCode::UNAUTHORIZED, "unauthorised").into_response();
     }
     let receiver = state.bus.subscribe();
     let stream = sse_stream(receiver);
-    Sse::new(stream).keep_alive(KeepAlive::default()).into_response()
+    Sse::new(stream)
+        .keep_alive(KeepAlive::default())
+        .into_response()
 }
 
 fn sse_stream(
@@ -90,7 +89,9 @@ async fn ws_handler(
 
 async fn ws_loop(mut socket: WebSocket, mut rx: crate::broadcast::BusReceiver) {
     while let Ok(ev) = rx.recv().await {
-        let Ok(json) = serde_json::to_string(&ev) else { continue; };
+        let Ok(json) = serde_json::to_string(&ev) else {
+            continue;
+        };
         if socket.send(Message::Text(json.into())).await.is_err() {
             break;
         }

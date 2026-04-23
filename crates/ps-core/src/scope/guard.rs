@@ -168,7 +168,10 @@ mod tests {
     fn denies_outside_window() {
         let g = ScopeGuard::builder()
             .allow_cidr("10.0.0.0/24".parse().unwrap())
-            .window(datetime!(2026-01-01 00:00 UTC), datetime!(2026-02-01 00:00 UTC))
+            .window(
+                datetime!(2026-01-01 00:00 UTC),
+                datetime!(2026-02-01 00:00 UTC),
+            )
             .build();
         let target = Target::new("10.0.0.5".parse().unwrap(), 80);
         assert_eq!(

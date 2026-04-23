@@ -81,10 +81,7 @@ mod tests {
 
     #[tokio::test]
     async fn removed_ip_remains_allowed() {
-        let initial = HashMap::from([(
-            "x".to_owned(),
-            vec!["1.1.1.1".parse().unwrap()],
-        )]);
+        let initial = HashMap::from([("x".to_owned(), vec!["1.1.1.1".parse().unwrap()])]);
         let mock = MockResolver {
             answers: Mutex::new(initial),
         };

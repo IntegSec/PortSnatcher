@@ -65,10 +65,7 @@ impl EventSink for WebhookSink {
                     );
                 }
                 Err(e) => {
-                    tracing::warn!(
-                        "webhook {} attempt {attempt} failed: {e:#}",
-                        self.url
-                    );
+                    tracing::warn!("webhook {} attempt {attempt} failed: {e:#}", self.url);
                 }
             }
             if attempt < self.max_attempts {
@@ -76,6 +73,10 @@ impl EventSink for WebhookSink {
                 delay *= 4;
             }
         }
-        tracing::error!("webhook {} gave up after {} attempts", self.url, self.max_attempts);
+        tracing::error!(
+            "webhook {} gave up after {} attempts",
+            self.url,
+            self.max_attempts
+        );
     }
 }

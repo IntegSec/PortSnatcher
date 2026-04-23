@@ -3,14 +3,14 @@
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+pub mod desktop;
+pub mod jsonl;
 pub mod sink;
 pub mod terminal;
-pub mod jsonl;
 pub mod webhook;
-pub mod desktop;
 
+pub use desktop::DesktopSink;
+pub use jsonl::JsonlSink;
 pub use sink::EventSink;
 pub use terminal::TerminalSink;
-pub use jsonl::JsonlSink;
 pub use webhook::WebhookSink;
-pub use desktop::DesktopSink;

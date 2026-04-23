@@ -39,7 +39,9 @@ pub struct EngineConfig {
 
 impl Default for EngineConfig {
     fn default() -> Self {
-        Self { kind: default_engine_kind() }
+        Self {
+            kind: default_engine_kind(),
+        }
     }
 }
 
