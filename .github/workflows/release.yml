@@ -1,184 +1,101 @@
 name: release
 
-# Triggered by a semver tag (v1.2.3). Builds cross-platform binaries
-# via cargo-dist, signs them via sigstore/cosign using the GitHub
-# Actions OIDC token, uploads to the GitHub Release, then publishes
-# the workspace's public crates to crates.io in dependency order.
-#
-# Signing is best-effort: if sigstore fails on a given target we log
-# and continue — missing signatures never block a release. Same policy
-# for crates.io: if `CARGO_REGISTRY_TOKEN` is absent, publishing is
-# skipped with a notice.
-
 on:
   push:
     tags:
       - 'v*.*.*'
-
-permissions:
-  contents: write
-  id-token: write # required for sigstore OIDC
-  packages: write
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
-  CARGO_NET_RETRY: 10
-  RUSTFLAGS: "-D warnings"
 
 jobs:
-  # --------------------------------------------------------------
-  # Build every artifact with cargo-dist's matrix.
-  # --------------------------------------------------------------
-  plan:
-    name: plan
-    runs-on: ubuntu-latest
-    outputs:
-      val: ${{ steps.plan.outputs.manifest }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Install cargo-dist
-        run: |
-          curl --proto '=https' --tlsv1.2 -LsSf \
-            https://github.com/axodotdev/cargo-dist/releases/download/v0.30.0/cargo-dist-installer.sh | sh
-      - id: plan
-        name: dist plan
-        run: |
-          cargo dist plan --output-format=json > plan.json
-          {
-            echo "manifest<<EOF"
-            cat plan.json
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-
-  build:
+  build-and-upload:
     name: build ${{ matrix.target }}
-    needs: plan
     strategy:
       fail-fast: false
       matrix:
         include:
-          - target: x86_64-unknown-linux-gnu
-            runner: ubuntu-latest
-          - target: aarch64-unknown-linux-gnu
-            runner: ubuntu-latest
-          - target: x86_64-apple-darwin
-            runner: macos-13
-          - target: aarch64-apple-darwin
-            runner: macos-14
-          - target: x86_64-pc-windows-msvc
-            runner: windows-latest
-    runs-on: ${{ matrix.runner }}
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
         with:
-          fetch-depth: 0
-      - name: Install Rust
-        run: rustup toolchain install stable --profile minimal --no-self-update
-      - name: Install cargo-dist
-        shell: bash
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }} --bin portsnatcher
+
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
         run: |
-          curl --proto '=https' --tlsv1.2 -LsSf \
-            https://github.com/axodotdev/cargo-dist/releases/download/v0.30.0/cargo-dist-installer.sh | sh
-      - name: Install cosign
-        uses: sigstore/cosign-installer@v3
-        with:
-          cosign-release: v2.2.4
-      - name: Build artifacts
-        shell: bash
-        run: cargo dist build --target=${{ matrix.target }} --artifacts=all
-      - name: Sign artifacts (sigstore)
-        id: sign
-        shell: bash
-        continue-on-error: true
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/portsnatcher dist/
+          cp LICENSE NOTICE README.md dist/
+          cd dist
+          tar czf ../portsnatcher-${{ github.ref_name }}-${{ matrix.target }}.tar.gz *
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist
+          Copy-Item target/${{ matrix.target }}/release/portsnatcher.exe dist/
+          Copy-Item LICENSE, NOTICE, README.md dist/
+          Compress-Archive -Path dist/* -DestinationPath portsnatcher-${{ github.ref_name }}-${{ matrix.target }}.zip
+
+      - name: Upload to release (Unix)
+        if: runner.os != 'Windows'
         env:
-          COSIGN_EXPERIMENTAL: "1"
-        run: |
-          set -e
-          shopt -s nullglob
-          cd target/distrib
-          for art in *.tar.gz *.tar.xz *.zip *.msi *.pkg; do
-            [ -f "$art" ] || continue
-            echo "Signing $art"
-            cosign sign-blob --yes \
-              --output-signature "${art}.sig" \
-              --output-certificate "${art}.pem" \
-              "$art" || {
-                echo "::warning::sigstore signing failed for ${art}; continuing unsigned"
-                rm -f "${art}.sig" "${art}.pem"
-              }
-          done
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: artifacts-${{ matrix.target }}
-          path: |
-            target/distrib/*
-          if-no-files-found: error
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload ${{ github.ref_name }} portsnatcher-${{ github.ref_name }}-${{ matrix.target }}.tar.gz --clobber
 
-  # --------------------------------------------------------------
-  # Publish the GitHub Release with every artifact collected above.
-  # --------------------------------------------------------------
-  release:
-    name: publish release
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: dist
-          pattern: artifacts-*
-          merge-multiple: true
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            dist/*
-          generate_release_notes: true
+      - name: Upload to release (Windows)
+        if: runner.os == 'Windows'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: gh release upload ${{ github.ref_name }} portsnatcher-${{ github.ref_name }}-${{ matrix.target }}.zip --clobber
 
-  # --------------------------------------------------------------
-  # Publish to crates.io in dependency order. Individual `cargo
-  # publish` invocations so version mismatches surface precisely.
-  # --------------------------------------------------------------
   publish-crates:
-    name: publish crates.io
-    needs: release
+    name: publish to crates.io
+    needs: build-and-upload
     runs-on: ubuntu-latest
+    if: ${{ !github.event.repository.fork }}
     steps:
       - uses: actions/checkout@v4
-      - name: Check token
-        id: token
-        env:
-          CRATES_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: |
-          if [ -z "${CRATES_TOKEN:-}" ]; then
-            echo "has_token=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=crates.io skipped::CARGO_REGISTRY_TOKEN is not set; skipping publish"
-          else
-            echo "has_token=true" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Install Rust
-        if: steps.token.outputs.has_token == 'true'
-        run: rustup toolchain install stable --profile minimal --no-self-update
-      - name: Publish in dependency order
-        if: steps.token.outputs.has_token == 'true'
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Publish (ordered)
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          set -euo pipefail
-          for crate in ps-core ps-bus ps-notify ps-engine ps-fingerprint ps-proxy integsec-portsnatcher; do
-            if [ ! -d "crates/${crate#integsec-}" ] && [ "$crate" != "integsec-portsnatcher" ]; then
-              echo "::warning::crate $crate does not exist in this repo yet; skipping"
-              continue
-            fi
-            echo "Publishing $crate"
-            cargo publish -p "$crate" --no-verify || {
-              echo "::warning::publish of $crate failed (already published? yanked? manual retry may be required)"
-            }
-            # crates.io takes a beat to index a new version; wait before
-            # trying the next crate in the chain.
-            sleep 15
+          if [ -z "${CARGO_REGISTRY_TOKEN}" ]; then
+            echo "::notice::CARGO_REGISTRY_TOKEN not set; skipping crates.io publish."
+            exit 0
+          fi
+          set -e
+          for crate in ps-core ps-bus ps-notify ps-engine ps-fingerprint ps-proxy; do
+            echo "::group::publish $crate"
+            cargo publish -p "$crate" --allow-dirty || echo "::warning::publish $crate failed (may already exist)"
+            echo "::endgroup::"
+            sleep 10
           done
+          cargo publish -p integsec-portsnatcher --allow-dirty || echo "::warning::publish integsec-portsnatcher failed"
