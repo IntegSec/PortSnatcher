@@ -3,18 +3,20 @@
 **Catch ephemeral ports the moment they open — fingerprint, hold open, and hand off to the pentester before the window closes.**
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Status](https://img.shields.io/badge/status-v0.1.0--alpha%20%E2%80%94%20foundations%20shipped-yellow)](./CHANGELOG.md)
+[![Status](https://img.shields.io/badge/status-v1.0.0%20%E2%80%94%20shipped-brightgreen)](./CHANGELOG.md)
 [![CI](https://github.com/IntegSec/PortSnatcher/actions/workflows/ci.yml/badge.svg)](https://github.com/IntegSec/PortSnatcher/actions/workflows/ci.yml)
 [![Platform](https://img.shields.io/badge/platform-linux_%7C_macOS_%7C_windows-lightgrey)]()
 [![Made by IntegSec](https://img.shields.io/badge/made_by-IntegSec-black)](https://integsec.com)
 
-> **Current status — April 2026 / v0.1.0-alpha:** foundations shipped. The
-> `portsnatcher/v1` event schema is frozen and locked behind snapshot tests.
-> The scope-file format is cross-compatible with [`IntegSec/agentic-pentest-proxy`](https://github.com/IntegSec/agentic-pentest-proxy).
-> A `--dry-run` mode exercises the full scope → config → event bus → sinks
-> spine with a synthetic event stream. Actual port-catching (Connect engine
-> + probe ladder) lands in v0.1.0. [Read the spec](./docs/superpowers/specs/2026-04-22-portsnatcher-design.md)
-> · [See the phase plans](./docs/superpowers/plans/) · [CHANGELOG](./CHANGELOG.md).
+> **Current status — April 2026 / v1.0.0:** public GA. All seven workspace
+> crates (`ps-core`, `ps-bus`, `ps-notify`, `ps-engine` with `ConnectEngine`
+> and `RawEngine`, `ps-fingerprint` with nine probes, `ps-proxy` with
+> dumb-tunnel + TLS-MITM hold-open, and the `portsnatcher` binary) compile
+> and test clean on Linux, macOS, and Windows CI. The `portsnatcher/v1` event
+> schema is frozen and locked behind snapshot tests; the scope-file format
+> is cross-compatible with [`IntegSec/agentic-pentest-proxy`](https://github.com/IntegSec/agentic-pentest-proxy).
+> [Read the spec](./docs/superpowers/specs/2026-04-22-portsnatcher-design.md)
+> · [Operator guide](./docs/operator-guide.md) · [CHANGELOG](./CHANGELOG.md).
 
 ---
 
