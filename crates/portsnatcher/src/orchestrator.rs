@@ -57,7 +57,8 @@ impl Orchestrator {
                     res = rx.recv() => {
                         match res {
                             Ok(ev) => {
-                                for sink in sinks.iter().cloned() {
+                                for sink in sinks.iter() {
+                                    let sink = Arc::clone(sink);
                                     let ev = ev.clone();
                                     tokio::spawn(async move {
                                         sink.emit(&ev).await;
