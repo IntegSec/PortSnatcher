@@ -17,8 +17,8 @@ fn sample(catch: CatchId) -> FingerprintReport {
         banner_excerpt: Bytes::from_static(b"HTTP/1.1 200 OK\r\n"),
         tls_info: None,
         probes_run: vec![ProbeRunRecord {
-            probe: "http_head",
-            outcome: "match",
+            probe: "http_head".to_owned(),
+            outcome: "match".to_owned(),
             bytes_captured: 17,
             duration_ms: 23,
         }],

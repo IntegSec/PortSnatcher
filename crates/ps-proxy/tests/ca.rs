@@ -5,6 +5,7 @@
 //! is exercised manually on the operator's workstation.
 
 use ps_proxy::Ca;
+use rustls::client::danger::ServerCertVerifier;
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::RootCertStore;
 use std::sync::Arc;
