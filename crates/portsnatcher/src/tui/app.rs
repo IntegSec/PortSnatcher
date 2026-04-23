@@ -115,7 +115,7 @@ impl TuiApp {
         self.push_log(summarize(ev));
         match &ev.body {
             EventBody::PortOpenDetected(p) => {
-                let cid = ev.catch_id.unwrap_or_else(CatchId::new);
+                let cid = ev.catch_id.unwrap_or_default();
                 self.catches.push(CatchRow {
                     catch_id: cid,
                     target: p.target.clone(),
