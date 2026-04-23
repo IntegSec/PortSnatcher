@@ -111,7 +111,7 @@ mod tests {
         }
         let later = start + Duration::from_millis(500);
         let acquired_after: usize = (0..10).filter(|_| rl.try_acquire_at(ip, later)).count();
-        assert!(acquired_after >= 4 && acquired_after <= 6);
+        assert!((4..=6).contains(&acquired_after));
     }
 
     #[test]
