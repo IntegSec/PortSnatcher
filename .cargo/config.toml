@@ -1,0 +1,8 @@
+[build]
+# Empty — let rustc pick defaults. Reserved for per-OS overrides if needed later.
+
+[alias]
+# Convenience aliases used in later tasks and docs.
+fmt-check = "fmt --all -- --check"
+clippy-all = "clippy --workspace --all-targets -- -D warnings"
+test-all = "test --workspace"
