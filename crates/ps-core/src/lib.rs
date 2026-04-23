@@ -4,3 +4,6 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub mod target;
 pub use target::{CidrBlock, Target};
+
+pub mod port;
+pub use port::{PortSpec, PortSpecError};
