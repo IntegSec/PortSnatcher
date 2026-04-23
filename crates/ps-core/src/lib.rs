@@ -7,3 +7,6 @@ pub use target::{CidrBlock, Target};
 
 pub mod port;
 pub use port::{PortSpec, PortSpecError};
+
+pub mod profile;
+pub use profile::{Profile, ProfileDefaults};
