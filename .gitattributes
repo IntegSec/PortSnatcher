@@ -1,0 +1,15 @@
+# Normalize all text files to LF in the repo; checkout with native endings on Windows.
+* text=auto eol=lf
+
+# Binary formats — never normalize.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.tar binary
+*.tar.gz binary
+*.bin binary
+*.pcap binary

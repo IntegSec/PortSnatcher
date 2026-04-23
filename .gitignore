@@ -1,0 +1,31 @@
+# Rust build output
+/target
+**/target
+Cargo.lock.bak
+
+# PortSnatcher runtime artifacts
+/artifacts
+/.portsnatcher
+*.pcap
+
+# Local config / secrets
+.env
+.env.local
+*.local.toml
+*.local.json
+
+# Per-machine Claude Code settings (shared project settings can live in .claude/settings.json)
+.claude/settings.local.json
+
+# Editor / IDE
+.idea
+.vscode
+*.iml
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# OS / cruft
+*.log
+*.tmp
