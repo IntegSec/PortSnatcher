@@ -252,23 +252,25 @@ impl Orchestrator {
         };
 
         engine_handle.stop();
-        self.shutdown.cancel();
 
-        // Give in-flight work a moment to finish cleanly.
+        // Let in-flight catches/probes drain before the terminal event.
         tokio::time::sleep(Duration::from_millis(300)).await;
 
         self.bus.send(Event::new(
             engagement_id,
             None,
             EventBody::EngagementFinished(EngagementFinished {
-                catches_total: 0, // best-effort; full accounting is Phase 2+ polish
+                catches_total: 0, // best-effort; full accounting is a polish item
                 artifacts_root: self.cli.artifacts_dir.to_string_lossy().into_owned(),
                 reason: reason.to_owned(),
             }),
         ));
 
-        // Final flush window.
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        // Final flush window: let the sink dispatcher pick up the
+        // EngagementFinished event before we tear it down.
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        self.shutdown.cancel();
+        tokio::time::sleep(Duration::from_millis(100)).await;
         Ok(())
     }
 }
