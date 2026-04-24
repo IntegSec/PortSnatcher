@@ -20,6 +20,8 @@ pub struct BusReceiver {
 pub enum BusError {
     #[error("bus closed")]
     Closed,
+    #[error("no buffered events available")]
+    Empty,
     #[error("subscriber lagged behind by {0} events")]
     Lagged(u64),
 }
@@ -53,6 +55,19 @@ impl BusReceiver {
             Ok(ev) => Ok(ev),
             Err(broadcast::error::RecvError::Closed) => Err(BusError::Closed),
             Err(broadcast::error::RecvError::Lagged(n)) => Err(BusError::Lagged(n)),
+        }
+    }
+
+    /// Non-blocking receive — returns the next buffered event if one
+    /// is immediately available. Used by the sink dispatcher to drain
+    /// residual events during a clean shutdown without awaiting.
+    pub fn try_recv(&mut self) -> Result<Event, BusError> {
+        use broadcast::error::TryRecvError;
+        match self.inner.try_recv() {
+            Ok(ev) => Ok(ev),
+            Err(TryRecvError::Empty) => Err(BusError::Empty),
+            Err(TryRecvError::Closed) => Err(BusError::Closed),
+            Err(TryRecvError::Lagged(n)) => Err(BusError::Lagged(n)),
         }
     }
 }

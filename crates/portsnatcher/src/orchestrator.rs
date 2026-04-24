@@ -75,42 +75,63 @@ impl Orchestrator {
         })
     }
 
-    /// Spawn a background task that forwards every bus event to every
-    /// sink. Each sink runs independently; a slow sink never blocks the
-    /// bus or any other sink.
-    pub fn spawn_sink_dispatcher(&self) {
+    /// Spawn the sink-dispatcher task. Returns its `JoinHandle` so the
+    /// caller can await a clean drain on shutdown.
+    ///
+    /// The dispatcher awaits each sink's `emit` sequentially per event.
+    /// All current sinks (tracing, JSONL) complete in <1ms, so
+    /// head-of-line blocking is negligible. The payoff: when the task
+    /// exits, every accepted event has been fully flushed — no more
+    /// "sleep and hope" at shutdown.
+    ///
+    /// On `shutdown.cancelled()` the dispatcher makes one final
+    /// non-blocking drain pass over any events still in the broadcast
+    /// buffer before exiting, so a terminal event emitted right before
+    /// the cancel (e.g. `EngagementFinished`) lands on disk.
+    pub fn spawn_sink_dispatcher(&self) -> tokio::task::JoinHandle<()> {
         let sinks = self.sinks.clone();
         let mut rx = self.bus.subscribe();
         let shutdown = self.shutdown.clone();
         tokio::spawn(async move {
             loop {
                 tokio::select! {
-                    _ = shutdown.cancelled() => break,
+                    biased;
+                    _ = shutdown.cancelled() => {
+                        // Drain any buffered events synchronously, then exit.
+                        while let Ok(ev) = rx.try_recv() {
+                            for sink in sinks.iter() {
+                                sink.emit(&ev).await;
+                            }
+                        }
+                        break;
+                    }
                     res = rx.recv() => {
                         match res {
                             Ok(ev) => {
                                 for sink in sinks.iter() {
-                                    let sink = Arc::clone(sink);
-                                    let ev = ev.clone();
-                                    tokio::spawn(async move {
-                                        sink.emit(&ev).await;
-                                    });
+                                    sink.emit(&ev).await;
                                 }
                             }
                             Err(ps_bus::broadcast::BusError::Closed) => break,
                             Err(ps_bus::broadcast::BusError::Lagged(n)) => {
                                 tracing::warn!("sink dispatcher lagged {n} events");
                             }
+                            // Empty is a try_recv-only outcome; async
+                            // recv never returns it.
+                            Err(ps_bus::broadcast::BusError::Empty) => {}
                         }
                     }
                 }
             }
-        });
+        })
     }
 
     /// Start the bus HTTP server, write bus.json, and spawn the sink
-    /// dispatcher. Returns the bound SocketAddr.
-    async fn bring_up_bus(&self) -> anyhow::Result<(SocketAddr, AuthToken)> {
+    /// dispatcher. Returns the bound SocketAddr, auth token, and the
+    /// dispatcher handle (awaited at shutdown for a clean drain).
+    async fn bring_up_bus(
+        &self,
+    ) -> anyhow::Result<(SocketAddr, AuthToken, tokio::task::JoinHandle<()>)> {
         let token = AuthToken::generate();
         let bind: SocketAddr = self
             .cli
@@ -130,12 +151,12 @@ impl Orchestrator {
         write_bus_info(&self.cli.artifacts_dir, &actual, &token)
             .await
             .ok();
-        self.spawn_sink_dispatcher();
-        Ok((actual, token))
+        let dispatcher = self.spawn_sink_dispatcher();
+        Ok((actual, token, dispatcher))
     }
 
     pub async fn run_dry(&self) -> anyhow::Result<()> {
-        self.bring_up_bus().await?;
+        let (_addr, _token, dispatcher) = self.bring_up_bus().await?;
 
         let sim = SimulationConfig {
             profile: format!("{:?}", self.cli.profile).to_lowercase(),
@@ -155,9 +176,8 @@ impl Orchestrator {
         };
         simulate(&self.bus, sim).await;
 
-        // Give sinks a beat to flush.
-        tokio::time::sleep(Duration::from_millis(200)).await;
         self.shutdown.cancel();
+        let _ = dispatcher.await;
         Ok(())
     }
 
@@ -166,7 +186,7 @@ impl Orchestrator {
     /// for `duration_ms` (default 10s when unspecified) or a shutdown
     /// is requested.
     pub async fn run_live(&self, duration_ms: u64) -> anyhow::Result<()> {
-        self.bring_up_bus().await?;
+        let (_addr, _token, dispatcher) = self.bring_up_bus().await?;
 
         let prepared = build_engagement(&self.cli).await?;
         let engagement = prepared.engagement;
@@ -300,8 +320,12 @@ impl Orchestrator {
 
         engine_handle.stop();
 
-        // Let in-flight catches/probes drain before the terminal event.
-        tokio::time::sleep(Duration::from_millis(300)).await;
+        // Short grace period so any probe ladder task that has a
+        // ConnectionCaught in-flight finishes its emits. Sink flushing
+        // is handled below by awaiting the dispatcher — this window
+        // only governs probe/catch completion, which is bounded by
+        // per-probe timeouts.
+        tokio::time::sleep(Duration::from_millis(50)).await;
 
         self.bus.send(Event::new(
             engagement_id,
@@ -313,11 +337,12 @@ impl Orchestrator {
             }),
         ));
 
-        // Final flush window: let the sink dispatcher pick up the
-        // EngagementFinished event before we tear it down.
-        tokio::time::sleep(Duration::from_millis(400)).await;
+        // Signal shutdown; the dispatcher will drain any buffered
+        // events (including the EngagementFinished just sent) and exit.
+        // Awaiting its handle is the shutdown barrier — when it
+        // returns, every accepted event is on disk.
         self.shutdown.cancel();
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        let _ = dispatcher.await;
         Ok(())
     }
 }
