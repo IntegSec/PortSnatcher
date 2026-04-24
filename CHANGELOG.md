@@ -12,13 +12,43 @@ extension) can plan ahead.
 ## [Unreleased]
 
 ### Planned
-- Wire `--tui` flag dispatch so the `ratatui` TUI is reachable from the
-  binary as a non-default mode.
-- Real-engagement orchestrator path (currently `--dry-run` is the only
-  exercised flow end-to-end).
 - Fill out smoltcp userspace TCP stack in the `RawEngine` (currently a
-  documented v1 simplification — engine delegates to `connect()` with
+  documented simplification — engine delegates to `connect()` with
   `engine="raw"` label pending the SYN-craft follow-up).
+- First-party Burp Suite extension (the event bus is the stable contract
+  it consumes).
+- IPv6 support in the target plan and scope guard.
+
+## [1.0.1] — 2026-04-23
+
+Polish release. Closes the gap between "v1 code shipped" and
+"`portsnatcher <target> --ports X` actually catches ports end-to-end."
+
+### Added
+- **Live-engagement orchestrator path**: `run_live` builds an
+  `Engagement` (from `--scope-file` / `--config` or a permissive default
+  for CLI-only runs), starts `ConnectEngine` with an expanded `(ip,
+  port)` plan, spawns a `ProbeLadder` worker pool consuming
+  `ConnectionCaught`, emits `EngagementStarted` / `EngagementFinished`.
+- **`--tui` flag** dispatches into the already-shipped `ratatui` TUI as
+  a peer subscriber to the bus. The TUI's own quit keybinding cancels
+  the shared `CancellationToken` so the engagement winds down cleanly.
+- **`--duration-ms`** CLI flag for explicit live-engagement windows
+  (default 10,000 ms).
+- **`live_smoke.rs`** E2E integration test: fixture TcpListener on
+  loopback, the binary catches it, asserts the full event arc lands
+  in `events.jsonl`.
+
+### Fixed
+- Emit `EngagementFinished` before cancelling the shared shutdown token
+  so the sink dispatcher has a chance to pick it up. Previously the
+  dispatcher broke out of its `tokio::select!` on cancel and discarded
+  the terminal event.
+
+### Notes
+- `ps-engine` and `ps-fingerprint` were added as `portsnatcher` binary
+  deps (they were transitively present but not directly listed, so the
+  orchestrator's `use ps_engine::...` failed to resolve on CI).
 
 ## [1.0.0] — 2026-04-23
 
@@ -136,6 +166,7 @@ synthetic event stream.
   this was required to build on the original development host and has
   the side effect of making CI artefacts smaller too.
 
-[Unreleased]: https://github.com/IntegSec/PortSnatcher/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/IntegSec/PortSnatcher/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/IntegSec/PortSnatcher/releases/tag/v1.0.1
 [1.0.0]: https://github.com/IntegSec/PortSnatcher/releases/tag/v1.0.0
 [0.1.0-alpha]: https://github.com/IntegSec/PortSnatcher/releases/tag/v0.1.0-alpha
