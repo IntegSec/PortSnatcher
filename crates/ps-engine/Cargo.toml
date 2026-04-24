@@ -31,6 +31,13 @@ which = "6"
 [target.'cfg(target_os = "windows")'.dependencies]
 libloading = "0.8"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# Linux SYN-race engine: raw AF_PACKET for crafted SYN send,
+# pnet::datalink for pcap-style SYN-ACK receive. Requires CAP_NET_RAW
+# at runtime. macOS/Windows intentionally do not get this dep yet —
+# their RawEngine stays on the connect fallback until v1.3+.
+pnet = "0.35"
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros"] }
 proptest = { workspace = true }

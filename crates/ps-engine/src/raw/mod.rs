@@ -10,6 +10,7 @@
 
 mod engine;
 pub mod kassist;
+pub mod syn_race;
 pub mod userspace;
 
 pub use engine::{Backend, CapabilityReport, RawEngine};
