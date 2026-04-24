@@ -1,27 +1,21 @@
-//! Userspace smoltcp backend — the portable raw-engine fallback.
+//! RawEngine's userspace backend.
 //!
-//! # v0.3.0-alpha status
+//! # Platform behaviour
 //!
-//! **This is a simplified stub.** The full Phase-4 design calls for a
-//! `smoltcp` TCP stack driven by a dedicated OS thread with a tokio mpsc
-//! bridge (see plan §17 "smoltcp integration shape"). That is a sizeable
-//! chunk of work and will land as a series of follow-up commits in the
-//! Phase-4 series.
+//! - **Linux (v1.2+):** delegates to [`crate::raw::syn_race::SynRace`] —
+//!   a real AF_PACKET SYN spray + pcap SYN-ACK receive + kernel-connect
+//!   handoff. Sub-100ms detection of ephemeral ports. Requires
+//!   `CAP_NET_RAW`. Falls back to the connect-labelled scheduler below
+//!   if SynRace's startup fails for any reason.
 //!
-//! For the v0.3.0-alpha cut we ship a pragmatic skeleton that:
+//! - **macOS / Windows:** still the connect-labelled-raw scheduler. The
+//!   v1.3+ plan is a BPF (macOS) and WinDivert-driven (Windows) port of
+//!   SynRace. Until then we warn loudly that the "raw" label is nominal
+//!   on these platforms.
 //!
-//! 1. Verifies raw-socket capability up front (so the engine refuses to
-//!    start cleanly when the process lacks `CAP_NET_RAW` / admin, rather
-//!    than silently behaving like the unprivileged connect engine).
-//! 2. Delegates the actual port probing to the same connect-based
-//!    scheduler the `ConnectEngine` uses, but **re-labels emitted events
-//!    with `engine = "raw"`** so downstream consumers see a consistent
-//!    view of which engine handled an engagement.
-//!
-//! This lets us ship a working-but-simplified `RawEngine` now while the
-//! real SYN crafting / smoltcp integration is built out in subsequent
-//! PRs. The stub status is documented loudly here and in a `STUB_NOTE`
-//! constant so it cannot be mistaken for the final implementation.
+//! The common `start()` entry point probes raw-socket capability
+//! up-front so callers see a single consistent error surface when the
+//! process lacks the privileges the engine needs.
 
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
@@ -42,14 +36,17 @@ use tokio::time::timeout;
 
 use crate::engine::{ConnectionCaught, EngineCapabilities, EngineContext, EngineHandle};
 
-/// Loud documentation that this module is intentionally incomplete.
-///
-/// Kept as a `const` (rather than a doc comment only) so that `cargo doc`
-/// and `rustdoc` both surface it, and so downstream code reviewers can
-/// `grep STUB_NOTE` to find every place we've made a pragmatic
-/// simplification.
+/// Greppable marker for the v1.2 Linux integration. On macOS/Windows
+/// this is still a documented simplification; the marker lets reviewers
+/// `grep BACKEND_STATUS` to audit the real state per platform.
+#[cfg(target_os = "linux")]
 #[allow(dead_code)]
-pub const STUB_NOTE: &str = "userspace smoltcp TCP stack is phase-4 follow-up; current impl uses connect() with engine=\"raw\" label";
+pub const BACKEND_STATUS: &str = "linux: SynRace (pnet raw SYN spray + pcap + connect handoff) since v1.2";
+
+#[cfg(not(target_os = "linux"))]
+#[allow(dead_code)]
+pub const BACKEND_STATUS: &str =
+    "non-linux: connect-labelled-raw scheduler; smoltcp/BPF/WinDivert port is v1.3+";
 
 const CONNECT_TIMEOUT: Duration = Duration::from_millis(800);
 const IDLE_SLEEP: Duration = Duration::from_millis(5);
@@ -89,11 +86,11 @@ pub fn raw_socket_probe() -> std::io::Result<()> {
 /// elevated privileges — if we lack them the caller should either
 /// escalate or choose a different engine.
 ///
-/// On success, spawns a scheduler task that, **for this v0.3.0-alpha
-/// cut**, drives port probing via async `TcpStream::connect` calls and
-/// emits events labelled `engine = "raw"`. The full smoltcp backend
-/// will replace this scheduler in a subsequent commit; the public
-/// interface will not change.
+/// On Linux, dispatches to the real SYN-race engine. On macOS/Windows
+/// (and on Linux if SYN-race startup fails), falls back to a
+/// connect-labelled scheduler that emits `engine = "raw"` events —
+/// preserves the public interface while the BPF/WinDivert ports are
+/// being written.
 pub async fn start(ctx: EngineContext) -> anyhow::Result<EngineHandle> {
     // Capability gate. Note: this probe may succeed on Windows even when
     // raw TCP is effectively blocked by the stack; that's fine, because
@@ -120,6 +117,31 @@ pub async fn start(ctx: EngineContext) -> anyhow::Result<EngineHandle> {
         min_detect_latency_ms: 10,
         supported: true,
     };
+
+    // v1.2+ Linux path: try the real SYN race. If it can't initialise
+    // (missing CAP_NET_RAW, no default interface, etc.) fall through to
+    // the connect-labelled-raw scheduler that v1.0-v1.1 shipped.
+    #[cfg(target_os = "linux")]
+    {
+        match crate::raw::syn_race::SynRace::start(ctx.clone()).await {
+            Ok(race_handle) => {
+                let mut rx = stop_rx;
+                tokio::spawn(async move {
+                    // Hold the race handle alive until stop is signalled;
+                    // its Drop impl tears down sender/receiver/handoff.
+                    let _guard = race_handle;
+                    let _ = rx.changed().await;
+                });
+                return Ok(EngineHandle::new(stop_tx, caps));
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "SYN-race startup failed ({e:#}); falling back to connect-labelled-raw"
+                );
+                // Fall through to the legacy scheduler on this branch.
+            }
+        }
+    }
 
     tokio::spawn(async move {
         run_scheduler(ctx, stop_rx).await;
