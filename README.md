@@ -3,7 +3,7 @@
 **Catch ephemeral ports the moment they open — fingerprint, hold open, and hand off to the pentester before the window closes.**
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Status](https://img.shields.io/badge/status-v1.0.1%20%E2%80%94%20live%20engagement%20working-brightgreen)](./CHANGELOG.md)
+[![Status](https://img.shields.io/badge/status-v1.2.0%20%E2%80%94%20real%20SYN%20race%20on%20Linux-brightgreen)](./CHANGELOG.md)
 [![CI](https://github.com/IntegSec/PortSnatcher/actions/workflows/ci.yml/badge.svg)](https://github.com/IntegSec/PortSnatcher/actions/workflows/ci.yml)
 [![Platform](https://img.shields.io/badge/platform-linux_%7C_macOS_%7C_windows-lightgrey)]()
 [![Made by IntegSec](https://img.shields.io/badge/made_by-IntegSec-black)](https://integsec.com)

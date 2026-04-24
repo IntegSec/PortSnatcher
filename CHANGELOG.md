@@ -12,12 +12,69 @@ extension) can plan ahead.
 ## [Unreleased]
 
 ### Planned
-- Fill out smoltcp userspace TCP stack in the `RawEngine` (currently a
-  documented simplification — engine delegates to `connect()` with
-  `engine="raw"` label pending the SYN-craft follow-up).
+- **macOS / Windows port of `SynRace`** (v1.3+): BPF on macOS,
+  WinDivert on Windows. Until then `RawEngine` on non-Linux platforms
+  is still the connect-labelled-raw scheduler.
 - First-party Burp Suite extension (the event bus is the stable contract
   it consumes).
-- IPv6 support in the target plan and scope guard.
+- IPv6 support in the target plan and scope guard — `SynRace` is
+  currently IPv4-only.
+- `rand` for source-port pool randomisation to reduce collisions with
+  the kernel's ephemeral range.
+
+## [1.2.0] — 2026-04-23
+
+**Real sub-100ms SYN race on Linux.** This is the release where the
+"catch ephemeral ports" headline stops being aspirational.
+
+### Added
+- **`ps-engine/src/raw/syn_race/`** — new Linux-only module:
+  - `packet.rs`: TCP SYN header construction + IPv4-pseudo-header
+    checksum. Pure-math, unit-tested cross-platform.
+  - `port_pool.rs`: atomic-cursor source-port pool (40000–49999).
+  - `sender.rs`: `pnet::transport` `IPPROTO_TCP` raw socket; sends
+    crafted SYNs from pool-allocated source ports. Includes
+    `discover_local_ipv4` helper (UDP-connect routing trick).
+  - `receiver.rs`: `pnet::datalink` pcap-style thread that filters
+    inbound SYN-ACKs by target-IP set + port-pool bounds and emits
+    `SynAckHit` via tokio mpsc.
+  - `linux_engine.rs`: orchestrator that spawns sender, receiver,
+    and a handoff task emitting `PortOpenDetected` the moment a
+    SYN-ACK lands and opening a `tokio::TcpStream::connect` for the
+    downstream fingerprinter.
+- `pnet = "0.35"` as a Linux-only workspace dep.
+- Tests: 6 pure-math packet tests, 3 filter-logic receiver tests,
+  4 port-pool tests. All run in CI without privileges.
+
+### Changed
+- **`RawEngine::start()` (Linux): delegates to `SynRace::start` first.**
+  If SYN-race can't initialise (missing `CAP_NET_RAW`, no default
+  IPv4 interface, etc.) it logs a warning and falls through to the
+  existing connect-labelled-raw scheduler. Public interface unchanged.
+- `BACKEND_STATUS` constant replaces the v1.0 `STUB_NOTE`. On Linux
+  it reads "SynRace since v1.2"; on macOS/Windows it still reads
+  "connect-labelled-raw scheduler; smoltcp/BPF/WinDivert port is
+  v1.3+" — greppable per-platform truth.
+
+### Scoped for v1.2
+- **IPv4 only** — v6 support is a v1.3 item.
+- **Single-NIC assumption** — we discover local IPv4 via the
+  UDP-connect trick once at engine start; multi-homed hosts with
+  different source IPs for different targets aren't handled yet.
+- **`nftables` RST-drop kassist** is still installed in parallel but
+  the SYN-race doesn't *require* it; on hosts without it, the remote
+  may RST our half-open sprays (harmless; the kernel-connect handoff
+  re-opens from a fresh source port).
+
+### Notes for operators
+- Grant `CAP_NET_RAW` (and `CAP_NET_BIND_SERVICE` if needed) to the
+  binary. Either run as root or use `setcap`:
+  ```
+  sudo setcap cap_net_raw,cap_net_admin+eip /usr/local/bin/portsnatcher
+  ```
+  See `docs/operator-guide.md` for the full recipe.
+
+## [1.0.1] — 2026-04-23
 
 ## [1.0.1] — 2026-04-23
 
@@ -166,7 +223,8 @@ synthetic event stream.
   this was required to build on the original development host and has
   the side effect of making CI artefacts smaller too.
 
-[Unreleased]: https://github.com/IntegSec/PortSnatcher/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/IntegSec/PortSnatcher/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/IntegSec/PortSnatcher/releases/tag/v1.2.0
 [1.0.1]: https://github.com/IntegSec/PortSnatcher/releases/tag/v1.0.1
 [1.0.0]: https://github.com/IntegSec/PortSnatcher/releases/tag/v1.0.0
 [0.1.0-alpha]: https://github.com/IntegSec/PortSnatcher/releases/tag/v0.1.0-alpha
