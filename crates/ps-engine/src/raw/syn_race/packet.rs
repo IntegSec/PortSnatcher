@@ -42,7 +42,11 @@ pub struct SynSpec {
 /// Returns the number of bytes written, which is always
 /// `TCP_HEADER_LEN`. Panics if `out.len() != TCP_HEADER_LEN`.
 pub fn build_syn_header(spec: &SynSpec, out: &mut [u8]) -> usize {
-    assert_eq!(out.len(), TCP_HEADER_LEN, "TCP header buffer must be 20 bytes");
+    assert_eq!(
+        out.len(),
+        TCP_HEADER_LEN,
+        "TCP header buffer must be 20 bytes"
+    );
 
     // src_port (2) | dst_port (2) | seq (4) | ack (4) | data_off+rsv+flags (2)
     // | window (2) | checksum (2) | urgent (2)
