@@ -8,15 +8,16 @@
 [![Platform](https://img.shields.io/badge/platform-linux_%7C_macOS_%7C_windows-lightgrey)]()
 [![Made by IntegSec](https://img.shields.io/badge/made_by-IntegSec-black)](https://integsec.com)
 
-> **Current status — April 2026 / v1.0.0:** public GA. All seven workspace
-> crates (`ps-core`, `ps-bus`, `ps-notify`, `ps-engine` with `ConnectEngine`
-> and `RawEngine`, `ps-fingerprint` with nine probes, `ps-proxy` with
-> dumb-tunnel + TLS-MITM hold-open, and the `portsnatcher` binary) compile
-> and test clean on Linux, macOS, and Windows CI. The `portsnatcher/v1` event
-> schema is frozen and locked behind snapshot tests; the scope-file format
-> is cross-compatible with [`IntegSec/agentic-pentest-proxy`](https://github.com/IntegSec/agentic-pentest-proxy).
-> [Read the spec](./docs/superpowers/specs/2026-04-22-portsnatcher-design.md)
-> · [Operator guide](./docs/operator-guide.md) · [CHANGELOG](./CHANGELOG.md).
+> **Current status — April 2026 / v1.2.0:** the SYN-race capability is
+> real on Linux. `RawEngine` runs a `pnet` AF_PACKET SYN spray + pcap
+> SYN-ACK receive + kernel-connect handoff at up to 10,000 pps/target
+> (requires `CAP_NET_RAW`). macOS and Windows still run the connect-engine
+> with a `"raw"` label while the BPF / WinDivert ports are written — flagged
+> honestly in `BACKEND_STATUS` and the CHANGELOG, not hidden. `portsnatcher/v1`
+> event schema frozen; scope-file format cross-compatible with
+> [`IntegSec/agentic-pentest-proxy`](https://github.com/IntegSec/agentic-pentest-proxy).
+> [Spec](./docs/superpowers/specs/2026-04-22-portsnatcher-design.md) ·
+> [Operator guide](./docs/operator-guide.md) · [CHANGELOG](./CHANGELOG.md).
 
 ---
 
@@ -38,7 +39,7 @@ PortSnatcher is the first tool purpose-built for the **race**. It watches a scop
 ```bash
 # On the pentester's laptop — targeting a scope-file-defined engagement
 $ portsnatcher --config engagement.toml
-[09:14:02] PortSnatcher v0.1.0 — engagement ENG-2026-0142
+[09:14:02] PortSnatcher v1.2.0 — engagement ENG-2026-0142
 [09:14:02] Profile: internal  |  Engine: raw  |  Targets: 10.20.0.0/16 (256 hosts)
 [09:14:02] Ports: ephemeral-iana (49152-65535)  |  Rate cap: 50000 pps
 [09:14:02] Event bus: http://127.0.0.1:7177/events  (token in ~/.config/portsnatcher/bus-token)
@@ -84,18 +85,19 @@ $ portsnatcher --config engagement.toml
                                               127.0.0.1:71xx (attach here)
 ```
 
-Everything communicates through a versioned JSON event bus. The same stream you see in the TUI is what a webhook receives, what `events.jsonl` records, and what the upcoming Burp extension (v1.1) will subscribe to over HTTP.
+Everything communicates through a versioned JSON event bus. The same stream you see in the TUI is what a webhook receives, what `events.jsonl` records, and what the future Burp extension will subscribe to over HTTP.
 
 ## Key features
 
 | | |
 |---|---|
-| **Two engines, one behavior** | `raw` (userspace TCP via `smoltcp` with per-OS kernel fast-paths on Linux/macOS/Windows) for speed and sub-100ms races; `connect` (unprivileged async `connect()`) for locked-down jumpboxes and containers. Same events, same pipeline. |
-| **Probe ladder, not probe list** | Passive banner read first (zero bytes sent), then TLS ClientHello, then port-aware protocol probes — one per fresh connection. Never chains a destructive probe after a soft one. |
+| **`RawEngine` (Linux, real SYN race since v1.2)** | `pnet` AF_PACKET SYN spray + pcap SYN-ACK receive + kernel-connect handoff. Sub-100ms detection of ephemeral ports at up to ~10,000 pps/target. Requires `CAP_NET_RAW`. On macOS/Windows the same engine falls back to a connect-labelled scheduler pending the BPF / WinDivert ports (v1.3). |
+| **`ConnectEngine`** | Unprivileged async `connect()` with `FuturesUnordered` concurrency. Works in containers, locked-down jumpboxes, CI. Same events, same pipeline. Use when you don't have `CAP_NET_RAW`. |
+| **Probe ladder, not probe list** | Passive banner read first (zero bytes sent), then TLS ClientHello, then port-aware protocol probes — one per fresh connection. Never chains a destructive probe after a soft one. Nine probes in v1 (HTTP, TLS, SSH, Redis, Mongo, Postgres, SMB, banner). |
 | **Hold-open tunnel** | The moment a port is caught, we stand up `localhost:71xx` piping bytes to the target. You point Burp / ncat / your custom exploit at it before the port closes. Optional TLS MITM for HTTPS catches, using a reusable on-disk CA. |
 | **Scope-aware probes** | Probes are tagged with [technique categories](https://github.com/IntegSec/agentic-pentest-proxy/blob/master/examples/scope-manifest.json) — `recon`, `web_app`, `api_testing`, `ssl_tls`, `destructive`. Probes without authorized coverage are skipped and audit-logged. |
 | **Stable event schema** | `portsnatcher/v1` events are a frozen JSON contract. Additive-only forever. Your Burp extension, SOC pipeline, or custom tooling can depend on it. |
-| **Real-time handoff** | Desktop toasts, Slack/Discord/ntfy/PagerDuty webhooks, terminal TUI, SSE/WebSocket bus — all fed from the same stream. |
+| **Real-time handoff** | Desktop toasts, Slack/Discord/ntfy/PagerDuty webhooks, terminal TUI (`--tui`), SSE/WebSocket bus — all fed from the same stream. |
 | **Safety first** | Scope file required; hard-deny on loopback/link-local; global + per-target pps caps; explicit-target rule; `--i-know-what-im-doing` flag for overrides (and yes, it's literally named that). Every decision logged to `audit.log`. |
 
 ## Cross-tool scope compatibility
@@ -141,23 +143,32 @@ PortSnatcher consumes the **same JSON scope-file format** as IntegSec's [`agenti
 
 ## Roadmap
 
-### v1 (target: code-complete over the coming weeks)
-- [x] Design locked ([spec](./docs/superpowers/specs/2026-04-22-portsnatcher-design.md))
-- [ ] `ps-core` (scope, config, event types)
-- [ ] `ps-engine` (raw + connect)
-- [ ] `ps-fingerprint` (probe ladder + v1 probe registry)
-- [ ] `ps-proxy` (dumb tunnel + TLS MITM)
-- [ ] `ps-bus` (SSE + WebSocket + frozen `portsnatcher/v1` schema)
-- [ ] `ps-notify` (terminal + TUI + toast + webhooks)
-- [ ] Cross-platform CI (Linux / macOS / Windows)
-- [ ] Race-harness conformance tests with codified catch-rate gates
-- [ ] First public release on crates.io and GitHub Releases
+### Shipped (v1.0 → v1.2)
+- [x] Design + five phase plans ([spec](./docs/superpowers/specs/2026-04-22-portsnatcher-design.md))
+- [x] `ps-core` (scope, config, frozen `portsnatcher/v1` event schema, insta snapshots)
+- [x] `ps-engine` — `ConnectEngine` + `RawEngine`
+- [x] `ps-fingerprint` — nine-probe ladder with fresh-connection discipline
+- [x] `ps-proxy` — dumb tunnel + TLS MITM with `rcgen`-signed CA
+- [x] `ps-bus` — SSE + WebSocket + bearer-token auth
+- [x] `ps-notify` — terminal / JSONL / webhook / desktop sinks
+- [x] `ratatui` TUI via `--tui`
+- [x] Linux / macOS / Windows CI matrix + fmt + clippy gate
+- [x] Fuzz targets + `cargo-deny` license policy
+- [x] Signed `cargo-dist`-style prebuilts via GitHub Releases
+- [x] Live-engagement E2E smoke test
+- [x] **Real Linux SYN race** (v1.2): `pnet` AF_PACKET + pcap + kernel-connect handoff
 
-### v1.1
-- First-party **Burp Suite extension** (Montoya API) that subscribes to the event bus and auto-wires caught tunnels into Burp's upstream
+### v1.3 — next
+- macOS BPF port of `SynRace`
+- Windows WinDivert port of `SynRace`
+- IPv6 support in target plan, scope guard, and SynRace
+- Multi-NIC per-target source-IP routing
+
+### v1.4+
+- First-party **Burp Suite extension** (Montoya API) subscribing to the event bus
 - Caido / ZAP plugins following the same pattern
 - Web dashboard for the event bus
-- IPv6 support
+- crates.io publish (`cargo install integsec-portsnatcher`) once the registry token is configured
 
 ### v2+
 - UDP support
@@ -175,39 +186,65 @@ PortSnatcher is a **professional pentest tool**, not a script-kiddie toy. It ref
 | | Linux | macOS | Windows |
 |---|---|---|---|
 | `ConnectEngine` | yes | yes | yes |
-| `RawEngine` (userspace `smoltcp`) | yes | yes | yes |
-| `RawEngine` kernel fast-path | `nftables` | `pf` | `WinDivert` |
-| Requires elevation for `RawEngine` | `CAP_NET_RAW` | root / `ChmodBPF` | admin |
+| `RawEngine` — real SYN race (v1.2+) | **yes** (`pnet` AF_PACKET + pcap) | not yet (v1.3: BPF) | not yet (v1.3: WinDivert) |
+| `RawEngine` — connect-labelled fallback | only if `SynRace` fails to init | yes (current) | yes (current) |
+| Optional `nftables` RST-drop kassist | installed when `nft` available | n/a | n/a |
+| Requires elevation for `RawEngine` | `CAP_NET_RAW` (`setcap cap_net_raw,cap_net_admin=eip`) | root | admin |
 
-Full feature parity across all three OSes is a v1 acceptance criterion — not a v1.1 goal.
+Linux is where the headline capability actually lives today. macOS and Windows are solid for the `ConnectEngine`, the hold-open proxy, TLS MITM, the TUI, and the full event-bus stack — they just don't do the real sub-100ms SYN race yet. That's v1.3.
 
-## Building from source (during pre-release development)
+**Honest check:** the real race only improves catch-rate for ports that open for milliseconds-to-seconds. If your target is serving a long-lived HTTPS endpoint on 443, the ConnectEngine on any OS is already fine.
+
+## Install
+
+**Prebuilt binary (recommended).** Grab the archive for your OS+arch from the
+[latest GitHub Release](https://github.com/IntegSec/PortSnatcher/releases/latest)
+and unpack it somewhere on your `$PATH`. Per release, we ship:
+
+- `portsnatcher-v1.2.0-x86_64-unknown-linux-gnu.tar.gz`
+- `portsnatcher-v1.2.0-x86_64-apple-darwin.tar.gz`
+- `portsnatcher-v1.2.0-aarch64-apple-darwin.tar.gz`
+- `portsnatcher-v1.2.0-x86_64-pc-windows-msvc.zip`
+
+On Linux, grant the real-SYN-race engine the capabilities it needs
+(otherwise it falls back to the connect-labelled scheduler):
+
+```bash
+sudo setcap cap_net_raw,cap_net_admin=eip "$(which portsnatcher)"
+```
+
+**Building from source:**
 
 ```bash
 git clone https://github.com/IntegSec/PortSnatcher
 cd PortSnatcher
-cargo build --release
+cargo build --release --bin portsnatcher
 ./target/release/portsnatcher --help
 ```
 
-Once released:
-```bash
-cargo install integsec-portsnatcher
-```
+**`cargo install`** will land once the `CARGO_REGISTRY_TOKEN` repo secret is configured (v1.4 roadmap):
 
-Or grab a signed prebuilt from [Releases](https://github.com/IntegSec/PortSnatcher/releases).
+```bash
+cargo install integsec-portsnatcher  # NOT YET published to crates.io
+```
 
 ## Contributing
 
-PortSnatcher is open to community contributions, but the event-bus schema and scope-file format are **stability-critical** — breaking changes require explicit discussion and a version bump. See `CONTRIBUTING.md` (landing alongside v0.1) for the process. For security-sensitive reports, see `SECURITY.md`.
+PortSnatcher is open to community contributions. Two rules are non-negotiable:
+
+1. **The `portsnatcher/v1` event schema is frozen.** Adding a new optional field is OK. Removing or renaming a field is a `v2` bump and requires coordinated consumer updates. The `insta` snapshots in `crates/ps-core/tests/snapshots/` are the enforcement mechanism — a PR that changes them must explain why.
+2. **Scope-file compatibility with `agentic-pentest-proxy` is a stability contract.** Anything that changes the top-level fields is a breaking change.
+
+See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for dev setup, commit conventions, and the PR checklist. For security-sensitive reports, see [`SECURITY.md`](./SECURITY.md).
 
 ## Prior art and influences
 
 PortSnatcher stands on the shoulders of:
 - `nmap`, `masscan`, `zmap`, `unicornscan` — port-scanning state of the art
-- `smoltcp` — the userspace TCP/IP stack that makes the `RawEngine` portable
-- `rustls` — the TLS implementation used throughout
+- `pnet` — the raw-socket + pcap crate that makes `RawEngine` tractable on Linux
+- `rustls` — the TLS implementation used for the MITM proxy
 - `ratatui`, `tokio`, `axum` — Rust's superb async ecosystem
+- `rcgen` — on-disk CA generation for the TLS MITM
 - Burp Collaborator / Interactsh — prior art for out-of-band handoff patterns
 - IntegSec's [`agentic-pentest-proxy`](https://github.com/IntegSec/agentic-pentest-proxy) — sister tool and source of the scope-file format
 
