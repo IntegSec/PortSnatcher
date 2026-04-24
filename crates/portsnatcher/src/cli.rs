@@ -48,6 +48,15 @@ pub struct Cli {
     #[arg(long = "dry-run")]
     pub dry_run: bool,
 
+    /// Render the live ratatui TUI. Defaults off; explicit opt-in.
+    #[arg(long)]
+    pub tui: bool,
+
+    /// Maximum live-engagement duration in milliseconds. Default 10s.
+    /// Shorter values are handy for automated smoke tests and quick probes.
+    #[arg(long = "duration-ms", default_value_t = 10_000)]
+    pub duration_ms: u64,
+
     /// Override hard safety caps. Required for some operations; its
     /// presence shows up in audit logs and pentest reports.
     #[arg(long = "i-know-what-im-doing")]
