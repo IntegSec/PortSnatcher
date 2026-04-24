@@ -219,7 +219,12 @@ async fn sender_loop(mut s: SenderCtx) {
         {
             Ok(_) => {}
             Err(violation) => {
-                emit_scope_blocked(&s.ctx.bus, &s.ctx.engagement, &target, &violation.to_string());
+                emit_scope_blocked(
+                    &s.ctx.bus,
+                    &s.ctx.engagement,
+                    &target,
+                    &violation.to_string(),
+                );
                 tokio::time::sleep(Duration::from_millis(5)).await;
                 continue;
             }
@@ -288,9 +293,7 @@ fn spawn_handoff(ctx: EngineContext, hit: SynAckHit) {
                     .await;
             }
             Ok(Err(e)) => {
-                tracing::debug!(
-                    "raw handoff connect to {addr} failed after SYN-ACK: {e:#}"
-                );
+                tracing::debug!("raw handoff connect to {addr} failed after SYN-ACK: {e:#}");
             }
             Err(_) => {
                 tracing::debug!("raw handoff connect to {addr} timed out");

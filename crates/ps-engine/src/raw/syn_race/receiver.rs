@@ -53,7 +53,10 @@ pub struct RecvConfig {
 /// Returns the thread handle so callers can `.join()` at shutdown.
 /// Errors surface if the datalink channel can't be opened (missing
 /// CAP_NET_RAW, interface gone, etc).
-pub fn spawn(cfg: RecvConfig, out: UnboundedSender<SynAckHit>) -> anyhow::Result<std::thread::JoinHandle<()>> {
+pub fn spawn(
+    cfg: RecvConfig,
+    out: UnboundedSender<SynAckHit>,
+) -> anyhow::Result<std::thread::JoinHandle<()>> {
     let (_tx, mut rx) = match datalink::channel(&cfg.interface, Default::default())
         .context("pnet datalink channel — needs CAP_NET_RAW or CAP_NET_ADMIN")?
     {
@@ -134,9 +137,7 @@ pub fn parse_syn_ack(
 /// network-namespaced CI runners).
 pub fn default_interface() -> Option<NetworkInterface> {
     datalink::interfaces().into_iter().find(|i| {
-        !i.is_loopback()
-            && i.is_up()
-            && i.ips.iter().any(|n| matches!(n.ip(), IpAddr::V4(_)))
+        !i.is_loopback() && i.is_up() && i.ips.iter().any(|n| matches!(n.ip(), IpAddr::V4(_)))
     })
 }
 

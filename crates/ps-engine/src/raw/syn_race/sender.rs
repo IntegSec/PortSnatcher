@@ -9,7 +9,9 @@ use std::net::Ipv4Addr;
 use anyhow::Context;
 use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::tcp::{ipv4_checksum, MutableTcpPacket, TcpFlags};
-use pnet::transport::{transport_channel, TransportChannelType, TransportProtocol, TransportSender};
+use pnet::transport::{
+    transport_channel, TransportChannelType, TransportProtocol, TransportSender,
+};
 
 use super::packet::TCP_HEADER_LEN;
 
@@ -44,8 +46,7 @@ impl SynSender {
     ) -> anyhow::Result<()> {
         let mut buf = [0u8; TCP_HEADER_LEN];
         {
-            let mut tcp = MutableTcpPacket::new(&mut buf)
-                .context("allocate MutableTcpPacket")?;
+            let mut tcp = MutableTcpPacket::new(&mut buf).context("allocate MutableTcpPacket")?;
             tcp.set_source(src_port);
             tcp.set_destination(dst_port);
             tcp.set_sequence(isn);
@@ -63,8 +64,7 @@ impl SynSender {
         // kernel's raw-socket send path; kernel fills IP header from
         // routing tables (incl. the source IP, which we assume matches
         // `self.src_ip` — this is the standard single-NIC assumption).
-        let pkt = MutableTcpPacket::new(&mut buf)
-            .context("re-wrap MutableTcpPacket for send")?;
+        let pkt = MutableTcpPacket::new(&mut buf).context("re-wrap MutableTcpPacket for send")?;
         self.tx
             .send_to(pkt, std::net::IpAddr::V4(dst_ip))
             .context("send_to raw TCP")?;
