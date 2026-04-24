@@ -381,9 +381,9 @@ async fn build_engagement(cli: &Cli) -> anyhow::Result<PreparedScope> {
                 // candidate target. For broader CIDRs we skip iteration
                 // here (could be millions of addresses); the operator
                 // should pass --target explicitly in that case.
-                if matches!(net, ipnet::IpNet::V4(n) if n.prefix_len() == 32) {
-                    scope_ips.push(net.network());
-                } else if matches!(net, ipnet::IpNet::V6(n) if n.prefix_len() == 128) {
+                let is_host = matches!(net, ipnet::IpNet::V4(n) if n.prefix_len() == 32)
+                    || matches!(net, ipnet::IpNet::V6(n) if n.prefix_len() == 128);
+                if is_host {
                     scope_ips.push(net.network());
                 }
             }
