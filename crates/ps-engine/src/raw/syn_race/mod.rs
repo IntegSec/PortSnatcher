@@ -27,8 +27,14 @@
 //!   half-opens before our handoff `connect()` arrives.
 
 pub mod packet;
+pub mod port_pool;
 
-// Phase 2 of the v1.2 work adds the Linux-only sender/receiver/port_pool
-// modules plus a `SynRace` orchestrator type. Phase 1 lands only the
-// platform-agnostic packet-math so CI can validate it without needing
-// CAP_NET_RAW or an interface it can drive.
+#[cfg(target_os = "linux")]
+pub mod receiver;
+#[cfg(target_os = "linux")]
+pub mod sender;
+
+#[cfg(target_os = "linux")]
+mod linux_engine;
+#[cfg(target_os = "linux")]
+pub use linux_engine::SynRace;
