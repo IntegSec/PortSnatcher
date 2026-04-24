@@ -163,9 +163,19 @@ impl Orchestrator {
     pub async fn run_live(&self, duration_ms: u64) -> anyhow::Result<()> {
         self.bring_up_bus().await?;
 
-        let engagement = build_engagement(&self.cli).await?;
+        let prepared = build_engagement(&self.cli).await?;
+        let engagement = prepared.engagement;
         let engagement_id = engagement.id;
-        let port_plan = build_port_plan(&self.cli)?;
+        let port_plan = build_port_plan(&self.cli, &prepared.scope_ips)?;
+        tracing::info!(
+            "built port plan: {} (ip, port) tuples across {} target(s)",
+            port_plan.len(),
+            port_plan
+                .iter()
+                .map(|(ip, _)| *ip)
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+        );
 
         let profile_defaults = engagement.profile.defaults();
         let rate = Arc::new(RateLimiter::new(
@@ -241,6 +251,30 @@ impl Orchestrator {
             }
         });
 
+        // Periodic progress heartbeat. Long scans against filtered
+        // hosts can otherwise look dead — no events fire until a port
+        // opens. A tracing::info! every 15 seconds gives the operator a
+        // pulse.
+        let hb_shutdown = self.shutdown.clone();
+        let hb_total_ms = duration_ms;
+        let hb_started = Instant::now();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(15));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            interval.tick().await; // consume the immediate first tick
+            loop {
+                tokio::select! {
+                    _ = hb_shutdown.cancelled() => break,
+                    _ = interval.tick() => {
+                        let elapsed = hb_started.elapsed().as_secs();
+                        let total = hb_total_ms / 1000;
+                        let remaining = total.saturating_sub(elapsed);
+                        tracing::info!("scan heartbeat  elapsed={}s remaining={}s", elapsed, remaining);
+                    }
+                }
+            }
+        });
+
         // Run until duration or shutdown.
         let timer = tokio::time::sleep(Duration::from_millis(duration_ms));
         tokio::pin!(timer);
@@ -275,12 +309,26 @@ impl Orchestrator {
     }
 }
 
+/// Output of [`build_engagement`] — the runtime Engagement plus the
+/// scope-derived list of IPs we'd naturally target if `--target` is
+/// omitted. `scope_ips` is the union of every `/32`/`/128` in
+/// `authorized_targets.ip_ranges` plus every IPv4 we resolved from
+/// `authorized_targets.domains`.
+pub struct PreparedScope {
+    pub engagement: Engagement,
+    pub scope_ips: Vec<IpAddr>,
+}
+
 /// Build an `Engagement` from the CLI. If `--scope-file` is supplied,
-/// load it; otherwise construct a minimal permissive scope for quick
-/// CLI-only runs (127.0.0.0/8 with an open time window — matching the
-/// safety posture of allowing only loopback by default when no scope
-/// file is present).
-async fn build_engagement(cli: &Cli) -> anyhow::Result<Engagement> {
+/// load it AND resolve every non-wildcard domain into its current IPv4
+/// addresses via `tokio::net::lookup_host`; each resolved IPv4 is
+/// added to the `ScopeGuard`'s allowlist as a `/32`. This matches the
+/// spec's monotonic-scope-growth policy for the single-startup case.
+///
+/// When no scope file is provided, construct a minimal synthetic one —
+/// permissive against the CLI `--target` (or loopback) with an open
+/// time window — so quick CLI-only runs still work.
+async fn build_engagement(cli: &Cli) -> anyhow::Result<PreparedScope> {
     let config = if let Some(path) = cli.config.as_ref() {
         Config::load(path).with_context(|| format!("load config {}", path.display()))?
     } else {
@@ -321,11 +369,64 @@ async fn build_engagement(cli: &Cli) -> anyhow::Result<Engagement> {
     };
 
     let mut builder = ScopeGuard::builder();
+    let mut scope_ips: Vec<IpAddr> = Vec::new();
+
+    // Authorized CIDRs go straight into the guard. For /32 entries we
+    // also surface them as candidate targets.
     for cidr_str in &scope_file.authorized_targets.ip_ranges {
-        if let Ok(net) = cidr_str.parse() {
-            builder = builder.allow_cidr(net);
+        match cidr_str.parse::<ipnet::IpNet>() {
+            Ok(net) => {
+                builder = builder.allow_cidr(net);
+                // For /32 (or /128) ranges record the exact host as a
+                // candidate target. For broader CIDRs we skip iteration
+                // here (could be millions of addresses); the operator
+                // should pass --target explicitly in that case.
+                if matches!(net, ipnet::IpNet::V4(n) if n.prefix_len() == 32) {
+                    scope_ips.push(net.network());
+                } else if matches!(net, ipnet::IpNet::V6(n) if n.prefix_len() == 128) {
+                    scope_ips.push(net.network());
+                }
+            }
+            Err(e) => {
+                tracing::warn!("ignoring bad CIDR in scope file: {cidr_str} ({e})");
+            }
         }
     }
+
+    // Authorized domains: resolve now, add each resolved IPv4 as /32.
+    // Wildcards (`*.example.com`) can't be resolved; we log and skip.
+    for domain in &scope_file.authorized_targets.domains {
+        if domain.starts_with('*') {
+            tracing::info!(
+                "scope domain {domain} is a wildcard — cannot resolve; matching hosts must be \
+                 added as explicit entries or via --target"
+            );
+            continue;
+        }
+        match tokio::net::lookup_host(format!("{domain}:0")).await {
+            Ok(addrs) => {
+                let mut found = 0usize;
+                for addr in addrs {
+                    if let IpAddr::V4(v4) = addr.ip() {
+                        let net: ipnet::IpNet = format!("{v4}/32").parse().expect("/32 parses");
+                        builder = builder.allow_cidr(net);
+                        scope_ips.push(IpAddr::V4(v4));
+                        found += 1;
+                        tracing::info!("scope domain {domain} resolved to {v4} (added as /32)");
+                    }
+                }
+                if found == 0 {
+                    tracing::warn!(
+                        "scope domain {domain} resolved to zero IPv4 addresses — skipping"
+                    );
+                }
+            }
+            Err(e) => {
+                tracing::warn!("scope domain {domain} failed to resolve: {e} — skipping");
+            }
+        }
+    }
+
     if let Some(cidr) = guard_cidr {
         builder = builder.allow_cidr(cidr.0);
     }
@@ -341,28 +442,59 @@ async fn build_engagement(cli: &Cli) -> anyhow::Result<Engagement> {
             builder = builder.deny_host(ip);
         }
     }
+
+    // De-duplicate scope_ips so a domain that resolves to the same IP as
+    // an explicit /32 entry doesn't appear twice.
+    scope_ips.sort();
+    scope_ips.dedup();
+
     let guard = builder.build();
-    Ok(Engagement::new(
-        EngagementId::new(),
-        profile,
-        scope_file,
-        config,
-        guard,
-    ))
+    Ok(PreparedScope {
+        engagement: Engagement::new(EngagementId::new(), profile, scope_file, config, guard),
+        scope_ips,
+    })
 }
 
-/// Expand the CLI `--target` and `--ports` into an explicit (ip, port) plan.
-fn build_port_plan(cli: &Cli) -> anyhow::Result<Vec<(IpAddr, u16)>> {
-    let target_str = cli.target.as_deref().unwrap_or("127.0.0.1");
-    let ip: IpAddr = target_str
-        .parse::<IpAddr>()
-        .with_context(|| format!("parse --target as IP {target_str}"))?;
-
+/// Expand `--target` + `--ports` into an explicit `(ip, port)` plan.
+///
+/// Precedence:
+/// 1. If `--target` is set, parse it as a single IP and use only that.
+/// 2. Otherwise, iterate every IP in `scope_ips` (from the scope file's
+///    `/32`s and resolved domains).
+/// 3. If both are empty, error out — defaulting silently to loopback
+///    lies to the operator and leads to a flood of `ScopeViolationBlocked`
+///    events.
+fn build_port_plan(cli: &Cli, scope_ips: &[IpAddr]) -> anyhow::Result<Vec<(IpAddr, u16)>> {
     let ports_str = cli.ports.as_deref().unwrap_or("top-1000");
     let ports =
         PortSpec::from_spec_str(ports_str).with_context(|| format!("parse --ports {ports_str}"))?;
 
-    Ok(ports.iter().map(|p| (ip, p)).collect())
+    let ips: Vec<IpAddr> = if let Some(target_str) = cli.target.as_deref() {
+        let ip: IpAddr = target_str
+            .parse()
+            .with_context(|| format!("parse --target as IP {target_str}"))?;
+        vec![ip]
+    } else if !scope_ips.is_empty() {
+        tracing::info!(
+            "no --target supplied; using {} scope-derived target(s): {:?}",
+            scope_ips.len(),
+            scope_ips
+        );
+        scope_ips.to_vec()
+    } else {
+        anyhow::bail!(
+            "no --target supplied and the scope file has no resolvable targets (no /32 ip_ranges \
+             and no resolvable domains). Add a target explicitly or populate the scope file."
+        );
+    };
+
+    let mut plan = Vec::with_capacity(ips.len() * ports.len());
+    for ip in &ips {
+        for port in ports.iter() {
+            plan.push((*ip, port));
+        }
+    }
+    Ok(plan)
 }
 
 /// Build a full-registry ProbeLadder rooted at the artifacts dir.

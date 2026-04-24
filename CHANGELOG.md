@@ -13,14 +13,49 @@ extension) can plan ahead.
 
 ### Planned
 - **macOS / Windows port of `SynRace`** (v1.3+): BPF on macOS,
-  WinDivert on Windows. Until then `RawEngine` on non-Linux platforms
-  is still the connect-labelled-raw scheduler.
-- First-party Burp Suite extension (the event bus is the stable contract
-  it consumes).
-- IPv6 support in the target plan and scope guard — `SynRace` is
-  currently IPv4-only.
-- `rand` for source-port pool randomisation to reduce collisions with
-  the kernel's ephemeral range.
+  WinDivert on Windows.
+- First-party Burp Suite extension.
+- IPv6 support in the target plan and scope guard.
+- `rand` for source-port pool randomisation.
+
+## [1.2.1] — 2026-04-24
+
+UX / correctness fixes surfaced during the first real-world engagement
+run. Same feature set as v1.2.0; no schema changes.
+
+### Fixed
+- **`TerminalSink` now prints the payload.** Before, every event
+  rendered as `INFO EventType schema=... engagement=...` with the
+  interesting fields swallowed — `ScopeViolationBlocked` in particular
+  hid its `reason` and target, making "why was this blocked?"
+  effectively unanswerable from the console. Per-variant summaries now
+  surface target:port, reason, protocol, probe outcome, latency, etc.
+- **Scope-file `authorized_targets.domains` are resolved at engagement
+  start** and each resolved IPv4 is added to the `ScopeGuard`
+  allowlist as a `/32`. The previous behaviour silently ignored the
+  domains, so a scope that authorised only domains (or a mix of
+  domains + `/32` IPs) effectively allowed nothing except the explicit
+  IPs. Wildcard domains log a skip notice.
+- **No more silent `--target` default to `127.0.0.1`.** If `--target`
+  is omitted, the port plan is built from the scope file's `/32`
+  ip-ranges + resolved domains. If neither are present, the binary
+  now errors clearly instead of flooding `ScopeViolationBlocked`.
+
+### Added
+- **15-second progress heartbeat** (`tracing::info!`) during live
+  engagements. Surfaces "elapsed=Xs remaining=Ys" so a 10-minute scan
+  against a fully filtered host doesn't look dead.
+- Helpful log lines when the orchestrator resolves scope domains,
+  builds the port plan, and when large CIDRs in `ip_ranges` are
+  skipped for iteration (add `--target` explicitly for those).
+
+### Notes for operators
+The first real engagement try revealed exactly the fixes above: a
+10-minute scan of `ephemeral-iana` against a hardened public host
+produced no open ports (correct) but also no intermediate output
+(bad). A separate run without `--target` produced a flood of blocks
+whose reason was invisible (worse). Both are fixed here. Rerun with
+the same scope file and command line; output should now be legible.
 
 ## [1.2.0] — 2026-04-23
 
@@ -223,7 +258,8 @@ synthetic event stream.
   this was required to build on the original development host and has
   the side effect of making CI artefacts smaller too.
 
-[Unreleased]: https://github.com/IntegSec/PortSnatcher/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/IntegSec/PortSnatcher/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/IntegSec/PortSnatcher/releases/tag/v1.2.1
 [1.2.0]: https://github.com/IntegSec/PortSnatcher/releases/tag/v1.2.0
 [1.0.1]: https://github.com/IntegSec/PortSnatcher/releases/tag/v1.0.1
 [1.0.0]: https://github.com/IntegSec/PortSnatcher/releases/tag/v1.0.0
