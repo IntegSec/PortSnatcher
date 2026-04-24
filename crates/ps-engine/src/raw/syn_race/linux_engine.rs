@@ -28,7 +28,6 @@ use ps_bus::broadcast::BusSender;
 use ps_core::engagement::Engagement;
 use ps_core::event::payload::{EventBody, ScopeViolationBlocked};
 use ps_core::event::Event;
-use ps_core::id::CatchId;
 use ps_core::target::Target;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::{self};
@@ -278,7 +277,7 @@ fn spawn_handoff(
     // re-catch — a new one for this iteration's probe ladder.
     let catch_id = tracker
         .observe(target_ip, hit.target_port, Observation::Open, 0, &bus)
-        .unwrap_or_else(CatchId::new);
+        .unwrap_or_default();
 
     tokio::spawn(async move {
         let addr = SocketAddr::new(target_ip, hit.target_port);
