@@ -41,7 +41,8 @@ use crate::engine::{ConnectionCaught, EngineCapabilities, EngineContext, EngineH
 /// `grep BACKEND_STATUS` to audit the real state per platform.
 #[cfg(target_os = "linux")]
 #[allow(dead_code)]
-pub const BACKEND_STATUS: &str = "linux: SynRace (pnet raw SYN spray + pcap + connect handoff) since v1.2";
+pub const BACKEND_STATUS: &str =
+    "linux: SynRace (pnet raw SYN spray + pcap + connect handoff) since v1.2";
 
 #[cfg(not(target_os = "linux"))]
 #[allow(dead_code)]
