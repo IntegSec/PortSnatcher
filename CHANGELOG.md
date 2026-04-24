@@ -20,6 +20,27 @@ extension) can plan ahead.
 - `HoldOpenClosed` event driven removal from the hold-open active-set
   (currently best-effort through `Drop`).
 
+## [1.2.5] — 2026-04-24
+
+Faster, cleaner shutdown.
+
+### Changed
+- **Run-live wind-down is now bounded by actual sink drain, not 800ms
+  of cargo-cult sleeps.** The old flow was:
+  `engine.stop() → 300ms → emit EngagementFinished → 400ms → shutdown.cancel() → 100ms`.
+  The sleeps were compensating for the sink dispatcher fanning out
+  per-sink emits as fire-and-forget `tokio::spawn` tasks — we had no
+  way to know when an event had actually landed on disk.
+  The dispatcher now awaits each event's sinks sequentially (all
+  current sinks — tracing, JSONL append-with-flush — complete in
+  <1ms, so HOL blocking is negligible in practice) and returns its
+  `JoinHandle`. On `shutdown.cancelled()` it makes one `try_recv`
+  drain pass over any buffered events, then exits. `run_live` awaits
+  that handle — a real barrier, not a sleep.
+  Net wind-down drops from ~800ms to ~50ms + drain.
+- Added `BusReceiver::try_recv` and a `BusError::Empty` variant so
+  the dispatcher can drain residual events without awaiting.
+
 ## [1.2.4] — 2026-04-24
 
 Hotfix: hold-open tunnels never fired in v1.2.2 / v1.2.3 because of a
@@ -340,7 +361,8 @@ synthetic event stream.
   this was required to build on the original development host and has
   the side effect of making CI artefacts smaller too.
 
-[Unreleased]: https://github.com/IntegSec/PortSnatcher/compare/v1.2.4...HEAD
+[Unreleased]: https://github.com/IntegSec/PortSnatcher/compare/v1.2.5...HEAD
+[1.2.5]: https://github.com/IntegSec/PortSnatcher/releases/tag/v1.2.5
 [1.2.4]: https://github.com/IntegSec/PortSnatcher/releases/tag/v1.2.4
 [1.2.3]: https://github.com/IntegSec/PortSnatcher/releases/tag/v1.2.3
 [1.2.2]: https://github.com/IntegSec/PortSnatcher/releases/tag/v1.2.2
