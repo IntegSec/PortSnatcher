@@ -20,6 +20,20 @@ extension) can plan ahead.
 - `HoldOpenClosed` event driven removal from the hold-open active-set
   (currently best-effort through `Drop`).
 
+## [1.2.3] — 2026-04-24
+
+Hotfix: `--tui` mode was unusable because tracing logs (including
+`TerminalSink` event summaries) were writing to the same stdout that
+crossterm's alternate screen owns, smashing every rendered frame
+into a wall of garbage. The Port Status panel was there — you just
+couldn't see it under the log spam.
+
+### Fixed
+- `--tui` now sinks tracing to `<artifacts_dir>/portsnatcher-tui.log`
+  (ANSI off) instead of stdout. Falls back to a no-op subscriber if the
+  log file can't be opened — better to lose the operational log than
+  corrupt the TUI. Non-TUI mode is unchanged.
+
 ## [1.2.2] — 2026-04-24
 
 Live port status + hold-open tunnels in the live orchestrator.
@@ -308,7 +322,8 @@ synthetic event stream.
   this was required to build on the original development host and has
   the side effect of making CI artefacts smaller too.
 
-[Unreleased]: https://github.com/IntegSec/PortSnatcher/compare/v1.2.2...HEAD
+[Unreleased]: https://github.com/IntegSec/PortSnatcher/compare/v1.2.3...HEAD
+[1.2.3]: https://github.com/IntegSec/PortSnatcher/releases/tag/v1.2.3
 [1.2.2]: https://github.com/IntegSec/PortSnatcher/releases/tag/v1.2.2
 [1.2.1]: https://github.com/IntegSec/PortSnatcher/releases/tag/v1.2.1
 [1.2.0]: https://github.com/IntegSec/PortSnatcher/releases/tag/v1.2.0
