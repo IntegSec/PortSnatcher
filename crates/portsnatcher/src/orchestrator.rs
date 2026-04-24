@@ -373,15 +373,15 @@ async fn build_ladder(artifacts_dir: &Path) -> anyhow::Result<ProbeLadder> {
         .unwrap_or_else(|_| FingerprintCache::new(artifacts_dir.join("fingerprint-cache.json")));
 
     let probes: Vec<Arc<dyn Fingerprinter>> = vec![
-        Arc::new(PassiveBanner::default()),
-        Arc::new(TlsHello::default()),
-        Arc::new(HttpHead::default()),
-        Arc::new(HttpGetRoot::default()),
-        Arc::new(SshBanner::default()),
-        Arc::new(RedisPing::default()),
-        Arc::new(MongoIsMaster::default()),
-        Arc::new(PostgresStartup::default()),
-        Arc::new(SmbNegotiate::default()),
+        Arc::new(PassiveBanner),
+        Arc::new(TlsHello),
+        Arc::new(HttpHead),
+        Arc::new(HttpGetRoot),
+        Arc::new(SshBanner),
+        Arc::new(RedisPing),
+        Arc::new(MongoIsMaster),
+        Arc::new(PostgresStartup),
+        Arc::new(SmbNegotiate),
     ];
 
     Ok(ProbeLadder {
