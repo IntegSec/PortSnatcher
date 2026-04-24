@@ -10,7 +10,8 @@
 //! banner bytes, etc.) is summarised into the event log and then
 //! dropped.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
+use std::time::Instant;
 
 use ps_core::event::payload::EventBody;
 use ps_core::event::Event;
@@ -57,6 +58,38 @@ pub struct CatchRow {
     pub status: CatchStatus,
 }
 
+/// Port-level status independent of catch lifecycle. The Port Status
+/// table in the TUI aggregates across the engagement by `(target,
+/// port)`, so always-open services (HTTPS 443) show as a single stable
+/// row and ephemeral flappers show their flip count + last change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PortLiveState {
+    Open,
+    Closed,
+    /// Was open at least once, then saw >=2 flips within recent
+    /// history. Cosmetic — the scheduler's real state machine lives in
+    /// [`ps_engine::port_state`].
+    Flapping,
+}
+
+#[derive(Debug, Clone)]
+pub struct PortStatus {
+    pub target: String,
+    pub port: u16,
+    pub state: PortLiveState,
+    /// When the current `state` started. Drives the "OPEN 4m20s"
+    /// column display.
+    pub since: Instant,
+    /// Total open↔closed transitions observed in this engagement.
+    pub flips: u32,
+    /// Best-known protocol and confidence from the most recent
+    /// FingerprintCaptured for this `(target, port)`.
+    pub protocol: Option<String>,
+    pub confidence: Option<f32>,
+    /// Local port of an active hold-open tunnel for this target, if any.
+    pub tunnel_port: Option<u16>,
+}
+
 /// One row in the Holds list (active hold-open tunnels).
 #[derive(Debug, Clone)]
 pub struct HoldRow {
@@ -80,6 +113,10 @@ pub struct HoldRow {
 pub struct TuiApp {
     /// Catch rows; append-only until the user presses `c`.
     pub catches: Vec<CatchRow>,
+    /// Per-(target, port) live status, keyed on `"{target}:{port}"` for
+    /// sort stability. Always-open services show as a single row that
+    /// ages in place; flappers flip between `Open` and `Closed`.
+    pub port_status: BTreeMap<String, PortStatus>,
     /// Active hold-open tunnels.
     pub holds: Vec<HoldRow>,
     /// Current pps divided by cap pps, clamped to 0.0-1.0.
@@ -126,6 +163,46 @@ impl TuiApp {
                     tunnel_port: None,
                     status: CatchStatus::Detecting,
                 });
+
+                // Port Status aggregation: transition or new entry.
+                let key = format!("{}:{}", p.target, p.port);
+                self.port_status
+                    .entry(key)
+                    .and_modify(|s| {
+                        if s.state != PortLiveState::Open {
+                            s.flips = s.flips.saturating_add(1);
+                            s.state = if s.flips >= 4 {
+                                PortLiveState::Flapping
+                            } else {
+                                PortLiveState::Open
+                            };
+                            s.since = Instant::now();
+                        }
+                    })
+                    .or_insert_with(|| PortStatus {
+                        target: p.target.clone(),
+                        port: p.port,
+                        state: PortLiveState::Open,
+                        since: Instant::now(),
+                        flips: 0,
+                        protocol: None,
+                        confidence: None,
+                        tunnel_port: None,
+                    });
+            }
+            EventBody::PortClosedDetected(p) => {
+                let key = format!("{}:{}", p.target, p.port);
+                if let Some(s) = self.port_status.get_mut(&key) {
+                    if s.state == PortLiveState::Open {
+                        s.flips = s.flips.saturating_add(1);
+                        s.state = if s.flips >= 4 {
+                            PortLiveState::Flapping
+                        } else {
+                            PortLiveState::Closed
+                        };
+                        s.since = Instant::now();
+                    }
+                }
             }
             EventBody::HoldOpenReady(h) => {
                 if let Some(cid) = ev.catch_id {
@@ -140,6 +217,14 @@ impl TuiApp {
                         mode: h.mode.clone(),
                     });
                 }
+                // Surface the tunnel port on the matching PortStatus row
+                // too. HoldOpenReady.upstream has shape "ip:port".
+                if let Some((ip, port)) = split_upstream(&h.upstream) {
+                    let key = format!("{ip}:{port}");
+                    if let Some(s) = self.port_status.get_mut(&key) {
+                        s.tunnel_port = Some(h.local_port);
+                    }
+                }
             }
             EventBody::HoldOpenClosed(_) => {
                 if let Some(cid) = ev.catch_id {
@@ -151,6 +236,12 @@ impl TuiApp {
                     if let Some(row) = self.catches.iter_mut().find(|r| r.catch_id == cid) {
                         row.protocol = f.protocol_guess.clone();
                         row.confidence = Some(f.confidence);
+                        // Enrich the PortStatus row too.
+                        let key = format!("{}:{}", row.target, row.port);
+                        if let Some(s) = self.port_status.get_mut(&key) {
+                            s.protocol = f.protocol_guess.clone();
+                            s.confidence = Some(f.confidence);
+                        }
                     }
                 }
             }
@@ -227,6 +318,35 @@ impl TuiApp {
         }
         self.event_log.push_back(line);
     }
+
+    /// Port-status rows sorted by `(state-order, target, port)`:
+    /// Open first, then Flapping, then Closed. Ties broken
+    /// alphabetically by target then numerically by port.
+    pub fn port_status_sorted(&self) -> Vec<&PortStatus> {
+        let mut rows: Vec<&PortStatus> = self.port_status.values().collect();
+        rows.sort_by_key(|s| {
+            let state_rank = match s.state {
+                PortLiveState::Open => 0,
+                PortLiveState::Flapping => 1,
+                PortLiveState::Closed => 2,
+            };
+            (state_rank, s.target.clone(), s.port)
+        });
+        rows
+    }
+}
+
+/// Parse an `"ip:port"` or `"[v6]:port"` upstream string. Returns None
+/// on malformed input — such events are ignored for PortStatus
+/// enrichment but still flow through the rest of the TUI normally.
+fn split_upstream(upstream: &str) -> Option<(String, u16)> {
+    if let Some((host, port)) = upstream.rsplit_once(':') {
+        if let Ok(p) = port.parse::<u16>() {
+            let host = host.trim_matches(['[', ']']);
+            return Some((host.to_owned(), p));
+        }
+    }
+    None
 }
 
 /// One-line event summary used in the event-log panel.
@@ -242,6 +362,18 @@ fn summarize(ev: &Event) -> String {
             format!(
                 "open {}:{} in {}ms via {}",
                 p.target, p.port, p.detect_latency_ms, p.engine
+            )
+        }
+        EventBody::PortClosedDetected(p) => {
+            format!(
+                "closed {}:{} ({}){}",
+                p.target,
+                p.port,
+                p.reason,
+                match p.was_open_for_ms {
+                    Some(ms) => format!(" after {ms}ms open"),
+                    None => String::new(),
+                }
             )
         }
         EventBody::HoldOpenReady(h) => {

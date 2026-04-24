@@ -7,6 +7,10 @@ use serde::{Deserialize, Serialize};
 pub enum EventBody {
     EngagementStarted(EngagementStarted),
     PortOpenDetected(PortOpenDetected),
+    /// New in v1.2.2 — additive to the frozen `portsnatcher/v1` schema.
+    /// Emitted when the scheduler observes an Open→Closed transition
+    /// for a `(target, port)` that was previously seen open.
+    PortClosedDetected(PortClosedDetected),
     HoldOpenReady(HoldOpenReady),
     HoldOpenClosed(HoldOpenClosed),
     ProbeAttempted(ProbeAttempted),
@@ -35,6 +39,23 @@ pub struct PortOpenDetected {
     pub engine: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub syn_rtt_ms: Option<u64>,
+}
+
+/// Emitted on an observed Open→Closed transition for a `(target, port)`
+/// that was previously open in this engagement. New in v1.2.2; consumers
+/// that don't know about it should tolerate and skip (documented v1
+/// additive-evolution policy).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PortClosedDetected {
+    pub target: String,
+    pub port: u16,
+    /// Why the scheduler believes the port is closed —
+    /// `"connection_refused"`, `"transient_timeout"`, `"rst"`, etc.
+    pub reason: String,
+    /// How long (ms) the port was observed open before this transition.
+    /// Useful for ephemeral-port flap analysis.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub was_open_for_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

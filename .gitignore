@@ -37,3 +37,6 @@ Thumbs.db
 # OS / cruft
 *.log
 *.tmp
+
+# Local prebuilt binaries / packaging staging
+/bin/

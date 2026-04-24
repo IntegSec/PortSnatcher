@@ -6,8 +6,8 @@
 
 use ps_core::event::payload::{
     CatchComplete, EngagementFinished, EngagementStarted, EventBody, FingerprintCaptured,
-    HoldOpenClosed, HoldOpenReady, PortOpenDetected, ProbeAttempted, RateCapEngaged,
-    ScopeViolationBlocked, TlsInfo,
+    HoldOpenClosed, HoldOpenReady, PortClosedDetected, PortOpenDetected, ProbeAttempted,
+    RateCapEngaged, ScopeViolationBlocked, TlsInfo,
 };
 use ps_core::event::Event;
 use ps_core::id::{CatchId, EngagementId, EventId};
@@ -54,6 +54,17 @@ fn snapshot_port_open_detected() {
         syn_rtt_ms: Some(2),
     }));
     insta::assert_snapshot!("port_open_detected", to_canonical_json(&ev));
+}
+
+#[test]
+fn snapshot_port_closed_detected() {
+    let ev = deterministic_event(EventBody::PortClosedDetected(PortClosedDetected {
+        target: "10.0.0.1".into(),
+        port: 54283,
+        reason: "connection_refused".into(),
+        was_open_for_ms: Some(4200),
+    }));
+    insta::assert_snapshot!("port_closed_detected", to_canonical_json(&ev));
 }
 
 #[test]

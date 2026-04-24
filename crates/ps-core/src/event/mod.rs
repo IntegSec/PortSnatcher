@@ -49,8 +49,8 @@ mod tests {
     use super::*;
     use crate::event::payload::{
         CatchComplete, EngagementFinished, EngagementStarted, EventBody, FingerprintCaptured,
-        HoldOpenClosed, HoldOpenReady, PortOpenDetected, ProbeAttempted, RateCapEngaged,
-        ScopeViolationBlocked, TlsInfo,
+        HoldOpenClosed, HoldOpenReady, PortClosedDetected, PortOpenDetected, ProbeAttempted,
+        RateCapEngaged, ScopeViolationBlocked, TlsInfo,
     };
 
     #[test]
@@ -93,6 +93,12 @@ mod tests {
                 detect_latency_ms: 180,
                 engine: "raw".into(),
                 syn_rtt_ms: Some(2),
+            }),
+            EventBody::PortClosedDetected(PortClosedDetected {
+                target: "10.0.0.1".into(),
+                port: 54283,
+                reason: "connection_refused".into(),
+                was_open_for_ms: Some(4200),
             }),
             EventBody::HoldOpenReady(HoldOpenReady {
                 local_port: 7101,

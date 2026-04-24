@@ -38,7 +38,12 @@ use ps_fingerprint::probes::{
 };
 use ps_notify::sink::EventSink;
 use ps_notify::{JsonlSink, TerminalSink};
-use tokio::sync::mpsc;
+use ps_proxy::dumb_tunnel::DumbTunnel;
+use ps_proxy::hold_open::{HoldOpen, HoldOpenManager};
+use ps_proxy::Ca;
+use std::collections::HashSet;
+use tokio::net::TcpStream as AsyncTcpStream;
+use tokio::sync::{mpsc, Mutex};
 use tokio_util::sync::CancellationToken;
 
 use crate::cli::{Cli, ProfileArg};
@@ -220,6 +225,12 @@ impl Orchestrator {
 
         let engine = Box::new(ConnectEngine::new());
         let engine_handle = engine.start(ctx).await?;
+
+        // Spawn hold-open manager: subscribe to PortOpenDetected events
+        // on the bus, and for each new (ip, port) open a fresh upstream
+        // TcpStream and hand it to DumbTunnel::establish. One tunnel per
+        // (ip, port); re-catches are no-ops.
+        spawn_hold_open_manager(self.bus.clone(), self.shutdown.clone(), engagement_id);
 
         // Spawn the ladder worker pool.
         let ladder = Arc::new(build_ladder(&self.cli.artifacts_dir).await?);
@@ -495,6 +506,127 @@ fn build_port_plan(cli: &Cli, scope_ips: &[IpAddr]) -> anyhow::Result<Vec<(IpAdd
         }
     }
     Ok(plan)
+}
+
+/// Subscribe to `PortOpenDetected` on the bus and stand up a DumbTunnel
+/// per first-seen `(ip, port)`. The tunnel's own `HoldOpenClosed`
+/// event removes the entry from the active set so a later re-open can
+/// spawn a fresh tunnel.
+///
+/// CA bootstrap is best-effort: if `Ca::new_or_load` fails (e.g. the
+/// config dir is not writable), we log a warning and skip hold-open.
+/// ConnectEngine + fingerprinter remain unaffected.
+fn spawn_hold_open_manager(
+    bus: BusSender,
+    shutdown: CancellationToken,
+    engagement_id: EngagementId,
+) {
+    tokio::spawn(async move {
+        // Prepare HoldOpenManager once. CA storage lives under the
+        // XDG-aware config dir (macOS/Linux/Windows all picked via
+        // `directories`). Hold-open is best-effort: if CA setup
+        // fails (locked-down filesystem, etc.), we log and skip.
+        let ca_dir = match ps_proxy::ca::storage::default_dir() {
+            Some(d) => d,
+            None => {
+                tracing::warn!(
+                    "hold-open manager disabled — no config dir available for CA storage"
+                );
+                return;
+            }
+        };
+        let ca = match Ca::new_or_load(&ca_dir) {
+            Ok(ca) => Arc::new(ca),
+            Err(e) => {
+                tracing::warn!(
+                    "hold-open manager disabled — could not load/generate MITM CA at {}: {e:#}. \
+                     ConnectEngine + fingerprint will still run.",
+                    ca_dir.display()
+                );
+                return;
+            }
+        };
+        let manager = Arc::new(HoldOpenManager::new(
+            ps_proxy::hold_open::DEFAULT_PORT_RANGE,
+            ca,
+        ));
+        let active: Arc<Mutex<HashSet<(IpAddr, u16)>>> = Arc::new(Mutex::new(HashSet::new()));
+
+        let mut rx = bus.subscribe();
+        loop {
+            tokio::select! {
+                _ = shutdown.cancelled() => break,
+                recv = rx.recv() => {
+                    let ev = match recv {
+                        Ok(ev) => ev,
+                        Err(ps_bus::broadcast::BusError::Closed) => break,
+                        Err(_) => continue,
+                    };
+                    match &ev.body {
+                        EventBody::PortOpenDetected(p) => {
+                            let Ok(ip) = p.target.parse::<IpAddr>() else { continue };
+                            let port = p.port;
+                            // De-dup: one tunnel per (ip, port).
+                            {
+                                let mut set = active.lock().await;
+                                if !set.insert((ip, port)) {
+                                    continue;
+                                }
+                            }
+                            let catch_id = ev.catch_id.unwrap_or_default();
+                            let bus = bus.clone();
+                            let manager = Arc::clone(&manager);
+                            let active = Arc::clone(&active);
+                            tokio::spawn(async move {
+                                if let Err(e) =
+                                    run_one_hold_open(manager, bus, engagement_id, catch_id, ip, port).await
+                                {
+                                    tracing::debug!("hold-open {ip}:{port} failed: {e:#}");
+                                }
+                                let mut set = active.lock().await;
+                                set.remove(&(ip, port));
+                            });
+                        }
+                        EventBody::PortClosedDetected(p) => {
+                            // If the port closed before or during hold-open,
+                            // let the tunnel's own lifecycle handle cleanup.
+                            // The active-set entry is removed by the
+                            // spawned task above on Drop. We just log.
+                            tracing::debug!(
+                                "port closed {}:{} (hold-open will exit via upstream_closed)",
+                                p.target,
+                                p.port
+                            );
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    });
+}
+
+/// Open a fresh upstream `TcpStream` to `(ip, port)` and run one
+/// DumbTunnel session. Returns when the tunnel closes.
+async fn run_one_hold_open(
+    manager: Arc<HoldOpenManager>,
+    bus: BusSender,
+    engagement_id: EngagementId,
+    catch_id: ps_core::id::CatchId,
+    ip: IpAddr,
+    port: u16,
+) -> anyhow::Result<()> {
+    let addr = SocketAddr::new(ip, port);
+    let upstream = tokio::time::timeout(Duration::from_millis(1500), AsyncTcpStream::connect(addr))
+        .await
+        .context("upstream connect timed out for hold-open")?
+        .context("upstream connect failed for hold-open")?;
+
+    let tunnel = DumbTunnel::new(manager);
+    Box::new(tunnel)
+        .establish(catch_id, upstream, addr, None, bus, engagement_id)
+        .await?;
+    Ok(())
 }
 
 /// Build a full-registry ProbeLadder rooted at the artifacts dir.

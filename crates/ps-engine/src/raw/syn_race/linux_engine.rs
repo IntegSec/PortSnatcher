@@ -26,7 +26,7 @@ use std::time::{Duration, Instant};
 use anyhow::Context;
 use ps_bus::broadcast::BusSender;
 use ps_core::engagement::Engagement;
-use ps_core::event::payload::{EventBody, PortOpenDetected, ScopeViolationBlocked};
+use ps_core::event::payload::{EventBody, ScopeViolationBlocked};
 use ps_core::event::Event;
 use ps_core::id::CatchId;
 use ps_core::target::Target;
@@ -101,10 +101,15 @@ impl SynRace {
         };
         let sender_task = tokio::spawn(sender_loop(sender_ctx));
 
-        // Handoff task: drains SynAckHit, emits PortOpenDetected,
-        // spawns kernel connect for the real TCP stream.
+        // Handoff task: drains SynAckHit, updates port-state tracker
+        // (which emits PortOpenDetected on transitions), spawns kernel
+        // connect for the real TCP stream.
         let handoff_ctx = ctx.clone();
         let handoff_stop = stop_rx.clone();
+        let tracker = Arc::new(crate::port_state::PortStateTracker::new(
+            ctx.engagement.id,
+            "raw",
+        ));
         let handoff_task = tokio::spawn(async move {
             let mut stop = handoff_stop;
             loop {
@@ -114,7 +119,7 @@ impl SynRace {
                     }
                     got = hit_rx.recv() => {
                         let Some(hit) = got else { break };
-                        spawn_handoff(handoff_ctx.clone(), hit);
+                        spawn_handoff(handoff_ctx.clone(), Arc::clone(&tracker), hit);
                     }
                 }
             }
@@ -254,29 +259,26 @@ async fn sender_loop(mut s: SenderCtx) {
     }
 }
 
-fn spawn_handoff(ctx: EngineContext, hit: SynAckHit) {
+fn spawn_handoff(
+    ctx: EngineContext,
+    tracker: std::sync::Arc<crate::port_state::PortStateTracker>,
+    hit: SynAckHit,
+) {
+    use crate::port_state::Observation;
+
     let bus = ctx.bus.clone();
-    let engagement_id = ctx.engagement.id;
     let catch_tx = ctx.catch_tx.clone();
     let target_ip = IpAddr::V4(hit.target_ip);
     let target = Target::new(target_ip, hit.target_port);
-    let catch_id = CatchId::new();
     let detect_start = Instant::now();
 
-    // Emit PortOpenDetected immediately — this is the "fast detection"
-    // win. Even if the handoff connect fails below, we've already
-    // logged the open port.
-    bus.send(Event::new(
-        engagement_id,
-        Some(catch_id),
-        EventBody::PortOpenDetected(PortOpenDetected {
-            target: hit.target_ip.to_string(),
-            port: hit.target_port,
-            detect_latency_ms: 0,
-            engine: "raw".into(),
-            syn_rtt_ms: None,
-        }),
-    ));
+    // Tracker emits PortOpenDetected on transitions; re-catches
+    // (already-open ports) don't spam. Always returns a CatchId we can
+    // thread through the handoff, either freshly minted or — on
+    // re-catch — a new one for this iteration's probe ladder.
+    let catch_id = tracker
+        .observe(target_ip, hit.target_port, Observation::Open, 0, &bus)
+        .unwrap_or_else(CatchId::new);
 
     tokio::spawn(async move {
         let addr = SocketAddr::new(target_ip, hit.target_port);
@@ -294,9 +296,11 @@ fn spawn_handoff(ctx: EngineContext, hit: SynAckHit) {
             }
             Ok(Err(e)) => {
                 tracing::debug!("raw handoff connect to {addr} failed after SYN-ACK: {e:#}");
+                tracker.observe(target_ip, hit.target_port, Observation::Transient, 0, &bus);
             }
             Err(_) => {
                 tracing::debug!("raw handoff connect to {addr} timed out");
+                tracker.observe(target_ip, hit.target_port, Observation::Transient, 0, &bus);
             }
         }
     });

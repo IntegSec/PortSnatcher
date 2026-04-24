@@ -17,6 +17,56 @@ extension) can plan ahead.
 - First-party Burp Suite extension.
 - IPv6 support in the target plan and scope guard.
 - `rand` for source-port pool randomisation.
+- `HoldOpenClosed` event driven removal from the hold-open active-set
+  (currently best-effort through `Drop`).
+
+## [1.2.2] — 2026-04-24
+
+Live port status + hold-open tunnels in the live orchestrator.
+
+### Added
+- **`PortClosedDetected` event** (additive to the frozen
+  `portsnatcher/v1` schema). Emitted by the scheduler when a port that
+  was previously seen open is observed closed — either directly
+  (`connection_refused`) or after two consecutive timeouts (interpreted
+  as closed). Includes `was_open_for_ms` so consumers can reason about
+  ephemeral flap behaviour.
+- **Scheduler state tracking**: new `ps_engine::port_state` module with
+  a thread-safe `PortStateTracker`. Shared by ConnectEngine,
+  RawEngine's userspace fallback, and Linux SynRace's handoff. All
+  three now emit `PortOpenDetected` only on Closed/Unknown → Open
+  transitions (no more 443 pile-up) and `PortClosedDetected` on
+  Open → Closed.
+- **TUI "Port Status" panel** keyed by `(target, port)`. Shows
+  `OPEN` / `CLOSED` / `FLAPPING` with colour, duration-in-state
+  (`3m14s`), flip counter, protocol, and tunnel-port. Always-open
+  services appear as a single stable row; ephemeral flappers flip
+  in place and count up. TUI layout is now 3 stacked rows:
+  Port Status → (Catches + Holds) → (Rate + Event log).
+- **Hold-open tunnel wired into the live orchestrator**. On each
+  PortOpenDetected, the orchestrator opens a fresh upstream TCP
+  connection and hands it to `ps_proxy::DumbTunnel::establish`; one
+  tunnel per `(ip, port)` (de-duplicated). `HoldOpenReady` events
+  surface the `localhost:71xx` port on the TUI's Port Status row.
+  CA bootstrap is best-effort: if CA load/generate fails (locked
+  filesystem), hold-open is skipped and the rest of the engagement
+  still runs.
+
+### Changed
+- PortOpenDetected semantics: now a **transition event**, not a
+  per-attempt event. External consumers that depended on "one
+  PortOpenDetected per catch" may want to also listen for
+  `ConnectionCaught` (internal mpsc) — but that's internal; on the
+  external JSON schema, consumers should reason in terms of
+  open↔closed transitions.
+
+### Notes for operators
+- After the v1.2.1 run your team did, you'll now see:
+  - `PortOpenDetected 38.32.112.58:443 engine=connect ...` exactly once
+  - Subsequent catches silently cached; no event spam
+  - `HoldOpenReady upstream=38.32.112.58:443 → localhost:7101 mode=dumb_tunnel`
+    — point Burp at `localhost:7101`
+  - A live Port Status panel when running with `--tui`
 
 ## [1.2.1] — 2026-04-24
 
@@ -258,7 +308,8 @@ synthetic event stream.
   this was required to build on the original development host and has
   the side effect of making CI artefacts smaller too.
 
-[Unreleased]: https://github.com/IntegSec/PortSnatcher/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/IntegSec/PortSnatcher/compare/v1.2.2...HEAD
+[1.2.2]: https://github.com/IntegSec/PortSnatcher/releases/tag/v1.2.2
 [1.2.1]: https://github.com/IntegSec/PortSnatcher/releases/tag/v1.2.1
 [1.2.0]: https://github.com/IntegSec/PortSnatcher/releases/tag/v1.2.0
 [1.0.1]: https://github.com/IntegSec/PortSnatcher/releases/tag/v1.0.1

@@ -25,9 +25,8 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use futures::FutureExt;
 use ps_bus::broadcast::BusSender;
 use ps_core::engagement::Engagement;
-use ps_core::event::payload::{EventBody, PortOpenDetected, ScopeViolationBlocked};
+use ps_core::event::payload::{EventBody, ScopeViolationBlocked};
 use ps_core::event::Event;
-use ps_core::id::CatchId;
 use ps_core::target::Target;
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::TcpStream;
@@ -152,9 +151,13 @@ pub async fn start(ctx: EngineContext) -> anyhow::Result<EngineHandle> {
 }
 
 /// Scheduler loop: mirrors `connect::scheduler::run` but emits events
-/// labelled `engine = "raw"`. This is the v0.3.0-alpha simplification —
-/// see `STUB_NOTE`.
+/// labelled `engine = "raw"`. Used when `SynRace` can't initialise
+/// (missing CAP_NET_RAW, non-Linux OS, or no IPv4 interface).
 async fn run_scheduler(ctx: EngineContext, mut stop: watch::Receiver<bool>) {
+    use std::sync::Arc;
+
+    use crate::port_state::{Observation, PortStateTracker};
+
     let engagement = ctx.engagement.clone();
     let rate = ctx.rate_limiter.clone();
     let catch_tx = ctx.catch_tx.clone();
@@ -165,6 +168,8 @@ async fn run_scheduler(ctx: EngineContext, mut stop: watch::Receiver<bool>) {
         tracing::warn!("raw userspace scheduler started with empty plan");
         return;
     }
+
+    let tracker = Arc::new(PortStateTracker::new(engagement.id, "raw"));
 
     let mut backoff: HashMap<(IpAddr, u16), (Instant, u32)> = HashMap::new();
     let mut in_flight: FuturesUnordered<
@@ -208,9 +213,9 @@ async fn run_scheduler(ctx: EngineContext, mut stop: watch::Receiver<bool>) {
             continue;
         }
 
-        let engagement_c = engagement.clone();
         let bus_c = bus.clone();
         let catch_tx_c = catch_tx.clone();
+        let tracker_c = Arc::clone(&tracker);
         let target_cloned = target.clone();
         let fut = async move {
             let addr = SocketAddr::new(target_cloned.ip, target_cloned.port);
@@ -218,27 +223,25 @@ async fn run_scheduler(ctx: EngineContext, mut stop: watch::Receiver<bool>) {
             match timeout(CONNECT_TIMEOUT, TcpStream::connect(addr)).await {
                 Ok(Ok(stream)) => {
                     let detect_latency = start.elapsed();
-                    let catch_id = CatchId::new();
-                    emit_port_open(
-                        &bus_c,
-                        &engagement_c,
-                        &target_cloned,
-                        &catch_id,
-                        detect_latency,
-                    );
+                    let detect_ms = detect_latency.as_millis() as u64;
+                    let catch_id = tracker_c
+                        .observe(ip, port, Observation::Open, detect_ms, &bus_c)
+                        .unwrap_or_default();
                     let _ = catch_tx_c
                         .send(ConnectionCaught {
                             catch_id,
                             target: target_cloned,
                             engine: "raw",
-                            detect_latency_ms: detect_latency.as_millis() as u64,
+                            detect_latency_ms: detect_ms,
                             stream,
                         })
                         .await;
                 }
+                Ok(Err(e)) if matches!(e.kind(), std::io::ErrorKind::ConnectionRefused) => {
+                    tracker_c.observe(ip, port, Observation::Closed, 0, &bus_c);
+                }
                 _ => {
-                    // Closed or transient — nothing to emit; scheduler
-                    // handles re-probe via backoff.
+                    tracker_c.observe(ip, port, Observation::Transient, 0, &bus_c);
                 }
             }
         };
@@ -258,27 +261,6 @@ async fn run_scheduler(ctx: EngineContext, mut stop: watch::Receiver<bool>) {
 
     while in_flight.next().await.is_some() {}
     drop(catch_tx);
-}
-
-fn emit_port_open(
-    bus: &BusSender,
-    engagement: &Engagement,
-    target: &Target,
-    catch_id: &CatchId,
-    detect_latency: Duration,
-) {
-    let event = Event::new(
-        engagement.id,
-        Some(*catch_id),
-        EventBody::PortOpenDetected(PortOpenDetected {
-            target: target.ip.to_string(),
-            port: target.port,
-            detect_latency_ms: detect_latency.as_millis() as u64,
-            engine: "raw".into(),
-            syn_rtt_ms: None,
-        }),
-    );
-    bus.send(event);
 }
 
 fn emit_scope_blocked(bus: &BusSender, engagement: &Engagement, target: &Target, reason: &str) {

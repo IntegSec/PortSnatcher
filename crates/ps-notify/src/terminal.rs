@@ -44,6 +44,16 @@ pub fn summarise(body: &EventBody) -> String {
             "PortOpenDetected   {}:{} engine={} detect_latency_ms={}",
             p.target, p.port, p.engine, p.detect_latency_ms
         ),
+        EventBody::PortClosedDetected(p) => {
+            let duration = match p.was_open_for_ms {
+                Some(ms) => format!(" was_open_for_ms={ms}"),
+                None => String::new(),
+            };
+            format!(
+                "PortClosedDetected {}:{} reason=\"{}\"{}",
+                p.target, p.port, p.reason, duration
+            )
+        }
         EventBody::HoldOpenReady(p) => format!(
             "HoldOpenReady      upstream={} → localhost:{} mode={}",
             p.upstream, p.local_port, p.mode
