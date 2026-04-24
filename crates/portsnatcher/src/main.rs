@@ -2,6 +2,8 @@
 
 //! PortSnatcher binary entry point.
 
+use std::path::Path;
+
 use clap::Parser;
 use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
@@ -17,7 +19,7 @@ use crate::orchestrator::Orchestrator;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    init_tracing();
+    init_tracing(cli.tui, &cli.artifacts_dir);
 
     if let Some(Command::Version) = cli.cmd {
         println!("portsnatcher {}", env!("CARGO_PKG_VERSION"));
@@ -66,9 +68,47 @@ async fn main() -> anyhow::Result<()> {
     result
 }
 
-fn init_tracing() {
+fn init_tracing(tui_mode: bool, artifacts_dir: &Path) {
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("info,hyper=warn,h2=warn"));
+
+    // In TUI mode the alternate screen owns stdout and crossterm owns
+    // raw mode. Letting tracing write to either stdout *or* stderr
+    // smashes the rendered frames with log lines. Sink to a file
+    // instead so the screen stays clean and the operational log is
+    // still recoverable post-engagement.
+    if tui_mode {
+        let _ = std::fs::create_dir_all(artifacts_dir);
+        let log_path = artifacts_dir.join("portsnatcher-tui.log");
+        match std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+        {
+            Ok(file) => {
+                tracing_subscriber::fmt()
+                    .with_env_filter(filter)
+                    .with_target(false)
+                    .with_ansi(false)
+                    .with_writer(std::sync::Mutex::new(file))
+                    .init();
+                return;
+            }
+            Err(e) => {
+                // No file? Last-resort: install a do-nothing subscriber
+                // so library calls to tracing::* don't end up on stdout
+                // and corrupt the TUI. Surface the failure once on
+                // stderr before crossterm grabs the screen.
+                eprintln!("tui log file {log_path:?} unavailable: {e}; tracing disabled");
+                tracing_subscriber::fmt()
+                    .with_env_filter(EnvFilter::new("off"))
+                    .with_writer(std::io::sink)
+                    .init();
+                return;
+            }
+        }
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_target(false)
