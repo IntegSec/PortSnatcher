@@ -17,6 +17,8 @@ ps-core = { path = "../ps-core" }
 ps-bus = { path = "../ps-bus" }
 ps-notify = { path = "../ps-notify" }
 ps-proxy = { path = "../ps-proxy" }
+ps-engine = { path = "../ps-engine" }
+ps-fingerprint = { path = "../ps-fingerprint" }
 
 tokio = { workspace = true }
 tokio-util = { workspace = true }
