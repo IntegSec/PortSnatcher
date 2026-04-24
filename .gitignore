@@ -14,6 +14,14 @@ Cargo.lock.bak
 *.local.toml
 *.local.json
 
+# Engagement-specific scope files — NEVER commit these. They carry live
+# target IPs/domains and belong in the engagement's private channel, not
+# the public repo. Generic, non-engagement-specific example scopes that
+# ship with the docs live under crates/ps-core/tests/fixtures/ and are
+# tracked explicitly.
+examples/scope-*-engagement.json
+engagements/
+
 # Per-machine Claude Code settings (shared project settings can live in .claude/settings.json)
 .claude/settings.local.json
 
