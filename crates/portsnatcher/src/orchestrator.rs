@@ -223,14 +223,16 @@ impl Orchestrator {
             plan: port_plan,
         };
 
+        // Spawn hold-open manager BEFORE the engine starts. It
+        // subscribes to PortOpenDetected events on the bus, and for
+        // each new (ip, port) opens a fresh upstream TcpStream and
+        // hands it to DumbTunnel::establish. One tunnel per (ip, port);
+        // re-catches are no-ops. Subscribing before the engine emits
+        // ensures no early catch is lost to the broadcast.
+        spawn_hold_open_manager(self.bus.clone(), self.shutdown.clone(), engagement_id);
+
         let engine = Box::new(ConnectEngine::new());
         let engine_handle = engine.start(ctx).await?;
-
-        // Spawn hold-open manager: subscribe to PortOpenDetected events
-        // on the bus, and for each new (ip, port) open a fresh upstream
-        // TcpStream and hand it to DumbTunnel::establish. One tunnel per
-        // (ip, port); re-catches are no-ops.
-        spawn_hold_open_manager(self.bus.clone(), self.shutdown.clone(), engagement_id);
 
         // Spawn the ladder worker pool.
         let ladder = Arc::new(build_ladder(&self.cli.artifacts_dir).await?);
@@ -521,6 +523,13 @@ fn spawn_hold_open_manager(
     shutdown: CancellationToken,
     engagement_id: EngagementId,
 ) {
+    // Subscribe BEFORE any async work. tokio::broadcast doesn't buffer
+    // events for a late subscriber, so if we subscribe inside the
+    // spawned task — after CA file I/O / keygen completes — any
+    // PortOpenDetected events the engine fires in the meantime are
+    // lost and hold-open never starts for them. This was the root
+    // cause of "TUI Tunnel column stays blank" in v1.2.2.
+    let mut rx = bus.subscribe();
     tokio::spawn(async move {
         // Prepare HoldOpenManager once. CA storage lives under the
         // XDG-aware config dir (macOS/Linux/Windows all picked via
@@ -552,7 +561,6 @@ fn spawn_hold_open_manager(
         ));
         let active: Arc<Mutex<HashSet<(IpAddr, u16)>>> = Arc::new(Mutex::new(HashSet::new()));
 
-        let mut rx = bus.subscribe();
         loop {
             tokio::select! {
                 _ = shutdown.cancelled() => break,
@@ -581,7 +589,7 @@ fn spawn_hold_open_manager(
                                 if let Err(e) =
                                     run_one_hold_open(manager, bus, engagement_id, catch_id, ip, port).await
                                 {
-                                    tracing::debug!("hold-open {ip}:{port} failed: {e:#}");
+                                    tracing::warn!("hold-open {ip}:{port} failed: {e:#}");
                                 }
                                 let mut set = active.lock().await;
                                 set.remove(&(ip, port));

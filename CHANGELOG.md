@@ -20,6 +20,24 @@ extension) can plan ahead.
 - `HoldOpenClosed` event driven removal from the hold-open active-set
   (currently best-effort through `Drop`).
 
+## [1.2.4] — 2026-04-24
+
+Hotfix: hold-open tunnels never fired in v1.2.2 / v1.2.3 because of a
+subscribe race. The `TUI Tunnel` column stayed blank, and the `Holds`
+panel was empty, even for catches that fingerprinted successfully.
+
+### Fixed
+- `spawn_hold_open_manager` now subscribes to the bus **synchronously
+  before** the task is spawned, and runs **before** the engine starts.
+  Previously `bus.subscribe()` happened inside the spawned task after
+  CA file I/O / keygen, so any `PortOpenDetected` the engine emitted
+  in that window was dropped by `tokio::broadcast` (no history for
+  late subscribers) — hold-open simply never saw them. Confirmed on
+  Windows against a local HTTP listener: `HoldOpenReady` now fires
+  reliably, and the TUI `Tunnel` column populates.
+- Elevate hold-open failure log from `debug!` → `warn!` so the operator
+  sees errors without flipping `RUST_LOG`.
+
 ## [1.2.3] — 2026-04-24
 
 Hotfix: `--tui` mode was unusable because tracing logs (including
@@ -322,7 +340,8 @@ synthetic event stream.
   this was required to build on the original development host and has
   the side effect of making CI artefacts smaller too.
 
-[Unreleased]: https://github.com/IntegSec/PortSnatcher/compare/v1.2.3...HEAD
+[Unreleased]: https://github.com/IntegSec/PortSnatcher/compare/v1.2.4...HEAD
+[1.2.4]: https://github.com/IntegSec/PortSnatcher/releases/tag/v1.2.4
 [1.2.3]: https://github.com/IntegSec/PortSnatcher/releases/tag/v1.2.3
 [1.2.2]: https://github.com/IntegSec/PortSnatcher/releases/tag/v1.2.2
 [1.2.1]: https://github.com/IntegSec/PortSnatcher/releases/tag/v1.2.1
