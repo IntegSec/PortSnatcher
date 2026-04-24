@@ -55,7 +55,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 # IDs / time / paths
 ulid = { version = "1", features = ["serde"] }
 time = { version = "0.3", features = ["serde", "formatting", "parsing", "macros"] }
-directories = "5"
+directories = "6"
 
 # Networking types
 ipnet = { version = "2", features = ["serde"] }
