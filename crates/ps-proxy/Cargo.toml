@@ -30,7 +30,7 @@ webpki-roots = "0.26"
 rcgen = { version = "0.13", features = ["pem", "x509-parser"] }
 x509-parser = "0.16"
 
-directories = "5"
+directories = "6"
 sha2 = "0.10"
 hex = "0.4"
 socket2 = "0.5"
