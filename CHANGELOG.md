@@ -20,6 +20,84 @@ extension) can plan ahead.
 - `HoldOpenClosed` event driven removal from the hold-open active-set
   (currently best-effort through `Drop`).
 
+## [1.2.6] — 2026-04-25
+
+Comprehensive bug-fix and correctness pass driven by smoke testing
+and a full code review. Replaces the v1.2.5 "sleep 500ms and hope"
+shutdown with a real probe-drain barrier; eliminates two classes of
+silent event loss; adds three new tests catching subtle state-machine
+regressions.
+
+### Fixed
+- **Re-catch ladder waste** (engine, fingerprint): Connect / raw /
+  SYN-race schedulers no longer spawn a fresh ladder run when the
+  port-state tracker reports an already-Open re-catch. The first
+  ladder is sufficient — re-running was hammering single-threaded
+  upstream services with redundant fresh `TcpStream::connect` between
+  probes, and emitting orphan `FingerprintCaptured` / `CatchComplete`
+  events tied to catch_ids the TUI never registered.
+- **Ladder fresh-connect timeout**: the inter-probe `TcpStream::connect`
+  in `ProbeLadder::run` had no timeout. An overloaded or filtered
+  target stalled the ladder indefinitely so neither
+  `FingerprintCaptured` nor `CatchComplete` ever fired. Now bounded
+  by `DEFAULT_PROBE_TIMEOUT` (500ms) — on timeout the ladder breaks
+  cleanly and terminal events still emit.
+- **Probe shutdown drain** (orchestrator): catch-receiver now tracks
+  every spawned ladder run in a `tokio::task::JoinSet` and drains it
+  via `joinset.join_next()` (with a 2s outer deadline that warns on
+  overrun) before EngagementFinished is emitted. This is the real
+  shutdown barrier — replacing the v1.2.5 `tokio::time::sleep(500ms)`
+  which was a known smell that occasionally lost terminal events on
+  slow runners.
+- **Mutex poison panic** (port_state): `Mutex::lock().unwrap()` in
+  the observation hot path is now `unwrap_or_else(|p| p.into_inner())`.
+  Critical section can't leave inconsistent state, so recovery is
+  safe and a single panicking observer thread no longer freezes
+  every subsequent observation.
+- **Spurious flap event** (port_state): the
+  `WaitingForClose → Open` recovery transition no longer emits a
+  fresh `PortOpenDetected`. Without a matching `PortClosedDetected`
+  emitted earlier (transient threshold wasn't reached), re-emitting
+  Open looked like a flap to consumers. Added regression test.
+- **SYN-race false-close** (linux_engine): handoff `TcpStream::connect`
+  failure after a confirmed SYN-ACK no longer feeds
+  `Observation::Transient` to the tracker. Two such failures (e.g.
+  TIME_WAIT exhaustion or brief upstream contention) were
+  false-closing still-open ports. Let the next SYN-ACK re-confirm
+  state instead.
+- **Hold-open silent miss** (orchestrator): `ev.catch_id.unwrap_or_default()`
+  in `spawn_hold_open_manager` is now a `let Some(...) else { error!(...);
+  continue }`. The fallback ULID would have collided across every
+  miss, hiding a tracker invariant violation behind an all-zeros id.
+- **Hold-open CA failure log level**: `warn!` → `error!` for both
+  no-config-dir and CA load/generate failures. Silent hold-open
+  disablement was hiding a real operator-facing failure mode.
+- **Duration→u64 truncation** (port_state): `since.elapsed().as_millis() as u64`
+  is now `u64::try_from(...).unwrap_or(u64::MAX)`, eliminating a
+  silent truncation lint smell in the `was_open_for_ms` event field.
+
+### Added
+- **TUI Port Status empty-state hint**: when no opens have been
+  detected yet, the panel renders a multi-line guidance message with
+  example `--ports` invocations instead of an empty table. First-time
+  users on the default `ephemeral-iana` range no longer assume the
+  tool is broken.
+- **Tests**: `engine_label_round_trips_on_port_open_detected`
+  (asserts the `&'static str` engine tag survives the bus emission)
+  and `one_transient_then_open_resets_without_emit` (covers the
+  `WaitingForClose → Open` recovery arm).
+
+### Changed
+- `BusReceiver::try_recv` and a `BusError::Empty` variant added in
+  v1.2.5 are now also used by tests.
+- Dispatcher doc-comment corrected: lossless delivery is *received*-
+  scoped, not *accepted*-scoped — `tokio::broadcast::Lagged` events
+  are still dropped on slow subscribers.
+- `PortLiveState::Flapping` doc-comment now matches the implementation
+  (≥4 transitions, was incorrectly documented as ≥2).
+- Cleanup: dropped a dummy `_unused_ct: Option<CancellationToken>`
+  binding and the corresponding import in `main.rs`.
+
 ## [1.2.5] — 2026-04-24
 
 Faster, cleaner shutdown.
@@ -361,7 +439,8 @@ synthetic event stream.
   this was required to build on the original development host and has
   the side effect of making CI artefacts smaller too.
 
-[Unreleased]: https://github.com/IntegSec/PortSnatcher/compare/v1.2.5...HEAD
+[Unreleased]: https://github.com/IntegSec/PortSnatcher/compare/v1.2.6...HEAD
+[1.2.6]: https://github.com/IntegSec/PortSnatcher/releases/tag/v1.2.6
 [1.2.5]: https://github.com/IntegSec/PortSnatcher/releases/tag/v1.2.5
 [1.2.4]: https://github.com/IntegSec/PortSnatcher/releases/tag/v1.2.4
 [1.2.3]: https://github.com/IntegSec/PortSnatcher/releases/tag/v1.2.3
