@@ -96,24 +96,34 @@ pub async fn run(ctx: EngineContext, mut stop: watch::Receiver<bool>) {
                     detect_latency,
                 } => {
                     let detect_ms = detect_latency.as_millis() as u64;
-                    // State tracker emits PortOpenDetected on transition
-                    // from not-Open → Open and hands us a CatchId. On a
-                    // re-catch of an already-Open port, returns None —
-                    // but we still need to hand the stream downstream
-                    // so the fingerprinter can re-probe (its cache will
-                    // short-circuit most of the work).
-                    let catch_id = tracker
-                        .observe(ip, port, Observation::Open, detect_ms, &bus)
-                        .unwrap_or_default();
-                    let _ = catch_tx
-                        .send(ConnectionCaught {
-                            catch_id,
-                            target: target_cloned,
-                            engine: "connect",
-                            detect_latency_ms: detect_ms,
-                            stream,
-                        })
-                        .await;
+                    // Tracker emits PortOpenDetected (and returns a
+                    // fresh CatchId) only on the *transition* into
+                    // Open. Re-catches of an already-Open port return
+                    // None — drop the stream in that case.
+                    //
+                    // Why drop: the first ladder run already
+                    // fingerprinted this (target, port). Spawning more
+                    // ladders per re-catch (a) hammers the upstream
+                    // service with redundant fresh connects between
+                    // probes, (b) can overload single-threaded servers
+                    // (Python SimpleHTTPServer in our smoke tests),
+                    // and (c) emits a stream of orphan
+                    // FingerprintCaptured / CatchComplete events tied
+                    // to catch_ids the TUI never saw.
+                    if let Some(catch_id) =
+                        tracker.observe(ip, port, Observation::Open, detect_ms, &bus)
+                    {
+                        let _ = catch_tx
+                            .send(ConnectionCaught {
+                                catch_id,
+                                target: target_cloned,
+                                engine: "connect",
+                                detect_latency_ms: detect_ms,
+                                stream,
+                            })
+                            .await;
+                    }
+                    // else: drop `stream` — re-catch, ladder already ran.
                 }
                 AttemptOutcome::Closed => {
                     tracker.observe(ip, port, Observation::Closed, 0, &bus);

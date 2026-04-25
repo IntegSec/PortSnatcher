@@ -128,9 +128,48 @@ fn draw_port_status(f: &mut Frame<'_>, area: Rect, app: &TuiApp) {
         closed_count,
         rows_data.len()
     );
-    let table = Table::new(rows, widths)
-        .header(header)
-        .block(Block::default().borders(Borders::ALL).title(title));
+    let block = Block::default().borders(Borders::ALL).title(title);
+
+    // Empty-state hint. The default --ports is `ephemeral-iana`
+    // (49152-65535); on most boxes nothing is listening up there, so
+    // a fresh user sees an empty table and assumes the tool is
+    // broken. Render a multi-line hint instead.
+    if rows_data.is_empty() {
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+        let lines = vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                "  No opens detected yet — engagement still running.",
+                Style::default().add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "  Hint: the default port range is ephemeral-iana (49152-65535)",
+                Style::default().fg(Color::DarkGray),
+            )),
+            Line::from(Span::styled(
+                "        which is mostly empty on a typical box.",
+                Style::default().fg(Color::DarkGray),
+            )),
+            Line::from(Span::styled(
+                "  Try:  --ports 1-1024",
+                Style::default().fg(Color::Cyan),
+            )),
+            Line::from(Span::styled(
+                "        --ports 22,80,443,3306,5432,6379,8080,8443",
+                Style::default().fg(Color::Cyan),
+            )),
+            Line::from(Span::styled(
+                "        --ports ephemeral-iana   (catch ports as they open)",
+                Style::default().fg(Color::Cyan),
+            )),
+        ];
+        f.render_widget(Paragraph::new(lines), inner);
+        return;
+    }
+
+    let table = Table::new(rows, widths).header(header).block(block);
     f.render_widget(table, area);
 }
 

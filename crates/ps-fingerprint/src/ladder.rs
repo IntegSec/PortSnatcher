@@ -139,12 +139,24 @@ impl ProbeLadder {
 
             // Fresh-connection discipline: first probe consumes the
             // initial stream; every subsequent probe gets a new one.
+            // The fresh connect is bounded by DEFAULT_PROBE_TIMEOUT —
+            // without this, an overloaded or filtered target can hang
+            // the ladder indefinitely (saw this in v1.2.5 smoke tests
+            // against single-threaded HTTP servers under re-catch
+            // load), which means no FingerprintCaptured /
+            // CatchComplete ever fires.
             let stream = match current_stream.take() {
                 Some(s) => s,
-                None => match TcpStream::connect((target.ip, target.port)).await {
-                    Ok(s) => s,
-                    Err(_) => {
-                        // Port closed between attempts — stop the ladder.
+                None => match tokio::time::timeout(
+                    DEFAULT_PROBE_TIMEOUT,
+                    TcpStream::connect((target.ip, target.port)),
+                )
+                .await
+                {
+                    Ok(Ok(s)) => s,
+                    Ok(Err(_)) | Err(_) => {
+                        // Port closed/filtered between attempts —
+                        // stop the ladder so terminal events still emit.
                         break;
                     }
                 },

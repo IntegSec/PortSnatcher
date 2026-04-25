@@ -271,13 +271,14 @@ fn spawn_handoff(
     let target = Target::new(target_ip, hit.target_port);
     let detect_start = Instant::now();
 
-    // Tracker emits PortOpenDetected on transitions; re-catches
-    // (already-open ports) don't spam. Always returns a CatchId we can
-    // thread through the handoff, either freshly minted or — on
-    // re-catch — a new one for this iteration's probe ladder.
-    let catch_id = tracker
-        .observe(target_ip, hit.target_port, Observation::Open, 0, &bus)
-        .unwrap_or_default();
+    // Tracker emits PortOpenDetected on transitions only. Re-catches
+    // of an already-Open port return None — skip the handoff entirely
+    // (no fresh ladder run). See connect::scheduler for the full
+    // rationale on why re-catches must not spawn another ladder.
+    let Some(catch_id) = tracker.observe(target_ip, hit.target_port, Observation::Open, 0, &bus)
+    else {
+        return;
+    };
 
     tokio::spawn(async move {
         let addr = SocketAddr::new(target_ip, hit.target_port);

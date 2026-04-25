@@ -224,18 +224,22 @@ async fn run_scheduler(ctx: EngineContext, mut stop: watch::Receiver<bool>) {
                 Ok(Ok(stream)) => {
                     let detect_latency = start.elapsed();
                     let detect_ms = detect_latency.as_millis() as u64;
-                    let catch_id = tracker_c
-                        .observe(ip, port, Observation::Open, detect_ms, &bus_c)
-                        .unwrap_or_default();
-                    let _ = catch_tx_c
-                        .send(ConnectionCaught {
-                            catch_id,
-                            target: target_cloned,
-                            engine: "raw",
-                            detect_latency_ms: detect_ms,
-                            stream,
-                        })
-                        .await;
+                    // Re-catch of already-Open port: tracker returns
+                    // None — drop the stream. See the matching comment
+                    // in connect::scheduler for the full rationale.
+                    if let Some(catch_id) =
+                        tracker_c.observe(ip, port, Observation::Open, detect_ms, &bus_c)
+                    {
+                        let _ = catch_tx_c
+                            .send(ConnectionCaught {
+                                catch_id,
+                                target: target_cloned,
+                                engine: "raw",
+                                detect_latency_ms: detect_ms,
+                                stream,
+                            })
+                            .await;
+                    }
                 }
                 Ok(Err(e)) if matches!(e.kind(), std::io::ErrorKind::ConnectionRefused) => {
                     tracker_c.observe(ip, port, Observation::Closed, 0, &bus_c);

@@ -320,12 +320,18 @@ impl Orchestrator {
 
         engine_handle.stop();
 
-        // Short grace period so any probe ladder task that has a
-        // ConnectionCaught in-flight finishes its emits. Sink flushing
-        // is handled below by awaiting the dispatcher — this window
-        // only governs probe/catch completion, which is bounded by
-        // per-probe timeouts.
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        // Probe-drain grace. Each ladder run is its own tokio::spawn'd
+        // task — we don't track those handles, so we can't `join` them.
+        // Without a window here, in-flight probes emit their
+        // FingerprintCaptured / CatchComplete after we've already
+        // cancelled shutdown, and the dispatcher has finished its
+        // drain pass — those terminal events get lost. 500ms covers
+        // the common case (HTTP HEAD + tls_hello + a banner wait
+        // typically resolve in 100-300ms each, with at most one
+        // probe per ladder taking the full 500ms timeout).
+        // Long-term fix: track ladder probe handles and join them
+        // here instead of sleeping.
+        tokio::time::sleep(Duration::from_millis(500)).await;
 
         self.bus.send(Event::new(
             engagement_id,

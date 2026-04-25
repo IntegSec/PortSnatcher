@@ -969,7 +969,7 @@ dependencies = [
 
 [[package]]
 name = "ephemeral-flapper"
-version = "1.2.4"
+version = "1.2.5"
 dependencies = [
  "anyhow",
  "serde",
@@ -1723,7 +1723,7 @@ dependencies = [
 
 [[package]]
 name = "integsec-portsnatcher"
-version = "1.2.4"
+version = "1.2.5"
 dependencies = [
  "anyhow",
  "arboard",
@@ -2529,7 +2529,7 @@ dependencies = [
 
 [[package]]
 name = "ps-bus"
-version = "1.2.4"
+version = "1.2.5"
 dependencies = [
  "async-trait",
  "axum",
@@ -2549,7 +2549,7 @@ dependencies = [
 
 [[package]]
 name = "ps-core"
-version = "1.2.4"
+version = "1.2.5"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2571,7 +2571,7 @@ dependencies = [
 
 [[package]]
 name = "ps-engine"
-version = "1.2.4"
+version = "1.2.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2596,7 +2596,7 @@ dependencies = [
 
 [[package]]
 name = "ps-fingerprint"
-version = "1.2.4"
+version = "1.2.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2620,7 +2620,7 @@ dependencies = [
 
 [[package]]
 name = "ps-notify"
-version = "1.2.4"
+version = "1.2.5"
 dependencies = [
  "async-trait",
  "httpmock",
@@ -2637,7 +2637,7 @@ dependencies = [
 
 [[package]]
 name = "ps-proxy"
-version = "1.2.4"
+version = "1.2.5"
 dependencies = [
  "anyhow",
  "async-trait",
