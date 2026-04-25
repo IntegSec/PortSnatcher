@@ -66,9 +66,13 @@ pub struct CatchRow {
 pub enum PortLiveState {
     Open,
     Closed,
-    /// Was open at least once, then saw >=2 flips within recent
-    /// history. Cosmetic — the scheduler's real state machine lives in
-    /// [`ps_engine::port_state`].
+    /// Was open at least once, then accumulated >=4 Open↔Closed
+    /// transitions in this engagement (i.e. two full down-up cycles).
+    /// Cosmetic — the scheduler's real state machine lives in
+    /// [`ps_engine::port_state`]; this enum only drives the TUI's
+    /// row colouring. Threshold tuned for ephemeral pentest targets:
+    /// a single down-up is just an ephemeral service, two cycles is
+    /// genuinely flapping.
     Flapping,
 }
 

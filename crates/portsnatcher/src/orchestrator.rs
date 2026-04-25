@@ -80,9 +80,13 @@ impl Orchestrator {
     ///
     /// The dispatcher awaits each sink's `emit` sequentially per event.
     /// All current sinks (tracing, JSONL) complete in <1ms, so
-    /// head-of-line blocking is negligible. The payoff: when the task
-    /// exits, every accepted event has been fully flushed — no more
-    /// "sleep and hope" at shutdown.
+    /// head-of-line blocking is negligible. When the task exits, every
+    /// event the dispatcher *received* has been fully flushed — but
+    /// note that `tokio::broadcast` can drop events on a slow
+    /// subscriber (`BusError::Lagged`). Lagged events are logged with
+    /// the lost count; they are not delivered to sinks and never
+    /// land on disk. If you need lossless delivery, increase the bus
+    /// channel capacity in `Orchestrator::from_cli`.
     ///
     /// On `shutdown.cancelled()` the dispatcher makes one final
     /// non-blocking drain pass over any events still in the broadcast
@@ -254,12 +258,18 @@ impl Orchestrator {
         let engine = Box::new(ConnectEngine::new());
         let engine_handle = engine.start(ctx).await?;
 
-        // Spawn the ladder worker pool.
+        // Spawn the ladder worker pool. Ladder runs are tracked in a
+        // JoinSet so the orchestrator can await every in-flight probe
+        // before emitting EngagementFinished. This is the real
+        // shutdown barrier — replacing the v1.2.5 "sleep 500ms and
+        // hope" with an actual signal that all FingerprintCaptured /
+        // CatchComplete events have been emitted.
         let ladder = Arc::new(build_ladder(&self.cli.artifacts_dir).await?);
         let ladder_shutdown = self.shutdown.clone();
         let ladder_engagement = engagement.clone();
         let ladder_bus = self.bus.clone();
-        tokio::spawn(async move {
+        let ladder_handle = tokio::spawn(async move {
+            let mut joinset: tokio::task::JoinSet<()> = tokio::task::JoinSet::new();
             loop {
                 tokio::select! {
                     _ = ladder_shutdown.cancelled() => break,
@@ -268,7 +278,7 @@ impl Orchestrator {
                         let ladder = Arc::clone(&ladder);
                         let engagement = ladder_engagement.clone();
                         let bus = ladder_bus.clone();
-                        tokio::spawn(async move {
+                        joinset.spawn(async move {
                             ladder
                                 .run(
                                     &engagement,
@@ -279,6 +289,36 @@ impl Orchestrator {
                                 )
                                 .await;
                         });
+                    }
+                }
+            }
+
+            // Drain in-flight probes. Each probe is bounded by
+            // DEFAULT_PROBE_TIMEOUT inside the ladder, so this loop
+            // terminates on its own — but cap the wait with an
+            // outer 2s deadline so a wedged probe (e.g. a kernel
+            // bug, antivirus interference) can't hold the whole
+            // engagement open indefinitely.
+            let drain_deadline = tokio::time::sleep(Duration::from_secs(2));
+            tokio::pin!(drain_deadline);
+            loop {
+                tokio::select! {
+                    biased;
+                    _ = &mut drain_deadline => {
+                        let pending = joinset.len();
+                        if pending > 0 {
+                            tracing::warn!(
+                                "ladder drain hit 2s deadline with {pending} probe(s) \
+                                 still running; dropping. Their FingerprintCaptured / \
+                                 CatchComplete events will not emit."
+                            );
+                        }
+                        break;
+                    }
+                    next = joinset.join_next() => {
+                        if next.is_none() {
+                            break;
+                        }
                     }
                 }
             }
@@ -320,18 +360,15 @@ impl Orchestrator {
 
         engine_handle.stop();
 
-        // Probe-drain grace. Each ladder run is its own tokio::spawn'd
-        // task — we don't track those handles, so we can't `join` them.
-        // Without a window here, in-flight probes emit their
-        // FingerprintCaptured / CatchComplete after we've already
-        // cancelled shutdown, and the dispatcher has finished its
-        // drain pass — those terminal events get lost. 500ms covers
-        // the common case (HTTP HEAD + tls_hello + a banner wait
-        // typically resolve in 100-300ms each, with at most one
-        // probe per ladder taking the full 500ms timeout).
-        // Long-term fix: track ladder probe handles and join them
-        // here instead of sleeping.
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        // Stopping the engine causes its scheduler task to exit and
+        // drop its `catch_tx`. The catch-receiver task notices the
+        // closed channel, exits its outer loop, and drains the
+        // in-flight ladder probes via its internal JoinSet. Awaiting
+        // the handle is a real shutdown barrier — every probe that
+        // started has now either finished (emitting
+        // FingerprintCaptured + CatchComplete) or hit the 2s drain
+        // deadline (logged warn).
+        let _ = ladder_handle.await;
 
         self.bus.send(Event::new(
             engagement_id,
@@ -345,8 +382,8 @@ impl Orchestrator {
 
         // Signal shutdown; the dispatcher will drain any buffered
         // events (including the EngagementFinished just sent) and exit.
-        // Awaiting its handle is the shutdown barrier — when it
-        // returns, every accepted event is on disk.
+        // Awaiting its handle is the second shutdown barrier — when
+        // it returns, every event is on disk.
         self.shutdown.cancel();
         let _ = dispatcher.await;
         Ok(())
@@ -569,8 +606,11 @@ fn spawn_hold_open_manager(
         let ca_dir = match ps_proxy::ca::storage::default_dir() {
             Some(d) => d,
             None => {
-                tracing::warn!(
-                    "hold-open manager disabled — no config dir available for CA storage"
+                // error! not warn! — silently losing hold-open is the
+                // bug we're trying to expose, not paper over.
+                tracing::error!(
+                    "hold-open manager disabled — no config dir available for CA storage. \
+                     Tunnels will NOT be created for caught ports."
                 );
                 return;
             }
@@ -578,9 +618,9 @@ fn spawn_hold_open_manager(
         let ca = match Ca::new_or_load(&ca_dir) {
             Ok(ca) => Arc::new(ca),
             Err(e) => {
-                tracing::warn!(
+                tracing::error!(
                     "hold-open manager disabled — could not load/generate MITM CA at {}: {e:#}. \
-                     ConnectEngine + fingerprint will still run.",
+                     ConnectEngine + fingerprint will still run, but no tunnels will be created.",
                     ca_dir.display()
                 );
                 return;
@@ -612,7 +652,20 @@ fn spawn_hold_open_manager(
                                     continue;
                                 }
                             }
-                            let catch_id = ev.catch_id.unwrap_or_default();
+                            // PortStateTracker always attaches a catch_id
+                            // to PortOpenDetected — a None here is a real
+                            // invariant violation, not something to paper
+                            // over with CatchId::default() (all-zeros
+                            // ULID, would collide across every miss).
+                            let Some(catch_id) = ev.catch_id else {
+                                tracing::error!(
+                                    "PortOpenDetected for {}:{} arrived with no catch_id; \
+                                     skipping hold-open. This is a tracker bug.",
+                                    p.target,
+                                    p.port,
+                                );
+                                continue;
+                            };
                             let bus = bus.clone();
                             let manager = Arc::clone(&manager);
                             let active = Arc::clone(&active);

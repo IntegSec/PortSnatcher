@@ -295,12 +295,20 @@ fn spawn_handoff(
                     .await;
             }
             Ok(Err(e)) => {
+                // Don't feed Transient here. The receiver already saw
+                // a SYN-ACK confirming the port is open; a kernel
+                // handoff connect failing is most likely transient
+                // contention (TIME_WAIT, ephemeral exhaustion, the
+                // server briefly busy), not the port closing. Pushing
+                // Transient on the tracker would let two such events
+                // false-close a still-open port. Let the next SYN-ACK
+                // re-confirm the state instead.
                 tracing::debug!("raw handoff connect to {addr} failed after SYN-ACK: {e:#}");
-                tracker.observe(target_ip, hit.target_port, Observation::Transient, 0, &bus);
             }
             Err(_) => {
-                tracing::debug!("raw handoff connect to {addr} timed out");
-                tracker.observe(target_ip, hit.target_port, Observation::Transient, 0, &bus);
+                tracing::debug!(
+                    "raw handoff connect to {addr} timed out (port still considered open)"
+                );
             }
         }
     });

@@ -5,7 +5,6 @@
 use std::path::Path;
 
 use clap::Parser;
-use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
 
 mod cli;
@@ -60,10 +59,6 @@ async fn main() -> anyhow::Result<()> {
         // main exits.
         let _ = h.await;
     }
-
-    // Silence the unused-import lint on CancellationToken when the TUI
-    // branch compiles out on a downstream consumer.
-    let _unused_ct: Option<CancellationToken> = None;
 
     result
 }

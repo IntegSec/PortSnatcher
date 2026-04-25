@@ -1,9 +1,16 @@
 //! Per-`(target_ip, target_port)` state machine driving event-stream
 //! dedup and Open↔Closed transition emission.
 //!
-//! Used by every engine (ConnectEngine scheduler, RawEngine userspace
-//! fallback, Linux SynRace handoff). Emits:
+//! Each engine instance constructs **its own** `PortStateTracker`;
+//! callers are ConnectEngine's scheduler, RawEngine's userspace
+//! fallback scheduler, and the Linux SynRace handoff. There is no
+//! cross-engine shared tracker today — only one engine runs per
+//! engagement, so divergence isn't possible. If a future engagement
+//! ever runs multiple engines concurrently against the same plan,
+//! plumb a single `Arc<PortStateTracker>` through `EngineContext`
+//! to keep state coherent.
 //!
+//! Emits:
 //! - [`PortOpenDetected`] on `Unknown`/`Closed`/`Flapping` → `Open`
 //! - [`PortClosedDetected`] on `Open` → `Closed` (or repeated
 //!   transient-failure windows interpreted as closed)
@@ -86,20 +93,34 @@ impl PortStateTracker {
         detect_latency_ms: u64,
         bus: &BusSender,
     ) -> Option<CatchId> {
-        let mut map = self.inner.lock().unwrap();
-        let prev = *map.get(&(ip, port)).unwrap_or(&State::Unknown);
+        // Recover from a poisoned guard rather than panicking the
+        // observation hot path — the critical section below is
+        // hashmap ops + Instant::now() and can't leave inconsistent
+        // state. A panicking observer thread elsewhere shouldn't
+        // freeze every subsequent observation.
+        let mut map = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let prev = map.get(&(ip, port)).copied().unwrap_or(State::Unknown);
 
         let (next, fired_open, fired_closed_with) = match (prev, obs) {
-            // Open transitions.
-            (State::Unknown, Observation::Open)
-            | (State::Closed, Observation::Open)
-            | (State::WaitingForClose { .. }, Observation::Open) => (
+            // Open transitions — only emit when the consumer has
+            // *previously* observed a Closed for this port. The
+            // WaitingForClose → Open recovery is purely internal
+            // (we never emitted PortClosedDetected for it because
+            // the transient threshold wasn't reached), so re-emitting
+            // here would spuriously look like a flap to consumers.
+            (State::Unknown, Observation::Open) | (State::Closed, Observation::Open) => (
                 State::Open {
                     since: Instant::now(),
                 },
                 true,
                 None,
             ),
+            (State::WaitingForClose { since_open, .. }, Observation::Open) => {
+                (State::Open { since: since_open }, false, None)
+            }
             (State::Open { since }, Observation::Open) => (State::Open { since }, false, None),
 
             // Close transitions.
@@ -110,7 +131,8 @@ impl PortStateTracker {
                 },
                 Observation::Closed,
             ) => {
-                let was_open_for_ms = since.elapsed().as_millis() as u64;
+                let was_open_for_ms =
+                    u64::try_from(since.elapsed().as_millis()).unwrap_or(u64::MAX);
                 (
                     State::Closed,
                     false,
@@ -128,7 +150,8 @@ impl PortStateTracker {
             (State::WaitingForClose { since_open, misses }, Observation::Transient) => {
                 let n = misses + 1;
                 if n >= TRANSIENT_CLOSE_THRESHOLD {
-                    let was_open_for_ms = since_open.elapsed().as_millis() as u64;
+                    let was_open_for_ms =
+                        u64::try_from(since_open.elapsed().as_millis()).unwrap_or(u64::MAX);
                     (
                         State::Closed,
                         false,
@@ -267,5 +290,55 @@ mod tests {
         t.observe(ip, 443, Observation::Open, 10, &bus);
         let ev = rx.recv().await.unwrap();
         assert!(matches!(ev.body, EventBody::PortOpenDetected(_)));
+    }
+
+    /// One transient followed by an Open should reset us back to
+    /// Open (the `(WaitingForClose, Observation::Open)` arm) without
+    /// emitting any extra event. Catches future refactors that would
+    /// drop this resilience.
+    #[tokio::test]
+    async fn one_transient_then_open_resets_without_emit() {
+        let (bus, mut rx) = new_bus();
+        let t = PortStateTracker::new(EngagementId::new(), "connect");
+        let ip: IpAddr = "10.0.0.1".parse().unwrap();
+
+        t.observe(ip, 443, Observation::Open, 10, &bus);
+        rx.recv().await.unwrap(); // drain initial open
+
+        // One transient — not enough to flip closed.
+        assert!(t
+            .observe(ip, 443, Observation::Transient, 0, &bus)
+            .is_none());
+        // Recovery — should NOT emit a fresh PortOpenDetected (we
+        // never emitted PortClosedDetected, so this is the same
+        // open-streak from the consumer's perspective).
+        assert!(t.observe(ip, 443, Observation::Open, 10, &bus).is_none());
+        // Bus should now be empty — try_recv returns Empty.
+        assert!(matches!(
+            rx.try_recv(),
+            Err(ps_bus::broadcast::BusError::Empty)
+        ));
+    }
+
+    /// The `engine` label fed at construction time must be the one
+    /// that round-trips on emitted PortOpenDetected. Catches
+    /// future copy-paste mistakes where one engine emits with another
+    /// engine's tag.
+    #[tokio::test]
+    async fn engine_label_round_trips_on_port_open_detected() {
+        let (bus, mut rx) = new_bus();
+        let t = PortStateTracker::new(EngagementId::new(), "raw");
+        let ip: IpAddr = "10.0.0.1".parse().unwrap();
+        t.observe(ip, 22, Observation::Open, 7, &bus);
+        let ev = rx.recv().await.unwrap();
+        match ev.body {
+            EventBody::PortOpenDetected(p) => {
+                assert_eq!(p.engine, "raw");
+                assert_eq!(p.detect_latency_ms, 7);
+                assert_eq!(p.target, "10.0.0.1");
+                assert_eq!(p.port, 22);
+            }
+            other => panic!("expected PortOpenDetected, got {other:?}"),
+        }
     }
 }
